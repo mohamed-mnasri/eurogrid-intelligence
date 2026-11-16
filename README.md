@@ -6,13 +6,15 @@ EuroGrid will combine European electricity-market data with transparent househol
 
 ## Current stage
 
-**Phase 0: project skeleton and source registration.** This repository currently contains project conventions, source/licence notes, setup guidance for Visual Studio Code, and read-only API probes. It does not yet contain production connectors, a database, analytics, an AI agent, or a frontend.
+**Phase 1: API connector proof of concept.** The project now has a timeout/retry-aware HTTPX client, read-only connectors for Energy-Charts, Open-Meteo, PVGIS 5.3 and Eurostat, offline contract tests, and a bounded sample runner. There is no database, transformation layer, analytics, AI agent or frontend yet.
+
+See [the Phase 1 sample record](docs/phase1.md) for the observed response shapes, intervals, units and licensing notes.
 
 The architecture is pan-European. Coverage is discovered from provider metadata and each endpoint's live response; it can differ by data family and date. Germany, France, Spain, Italy and the Netherlands are the first validation markets in the handbook, not the geographic limit. Energy-Charts public generation supports `country=all`, which the Phase 0 probe has verified. Day-ahead prices require one bidding zone per request and have zone-specific licensing, so an all-Europe price request is not available from that API. See `docs/sources.md`.
 
-## Phase 0 setup in Visual Studio Code
+## Project setup in Visual Studio Code
 
-1. Install Python 3.11 or newer if needed, then open this folder in VS Code.
+1. Install Python 3.11 or newer if needed (check the Python Launcher with `py -0p`), then open this folder in VS Code.
 2. Open **Terminal → New Terminal** and create the environment:
 
    ```powershell
@@ -32,7 +34,7 @@ The architecture is pan-European. Coverage is discovered from provider metadata 
 
    The probes make a small number of read-only requests, print response metadata and a short sample, and do not save provider data. They honor the Energy-Charts low request rate by making at most one request per endpoint on each run. See `docs/sources.md` for the source and licence inventory.
 
-## Run the Phase 0 tests
+## Run the offline tests
 
 In the VS Code terminal, activate `.venv` as above and run the offline unit tests:
 
@@ -40,7 +42,19 @@ In the VS Code terminal, activate `.venv` as above and run the offline unit test
 python -m unittest discover -s tests -v
 ```
 
-These tests check the all-Europe generation selector, zone-scoped prices, licence preservation, missing-value handling and the HTTP helper. They do not call any API. To repeat the live connectivity checks separately, run `python scripts/phase0_probe.py` (this does make public read-only API requests).
+The tests cover both phases, including request parameters, response validation, retry behavior, source metadata, missing values and saving the provenance manifest. They do not call any API. To repeat the Phase 0 connectivity checks separately, run `python scripts/phase0_probe.py` (this makes public read-only API requests).
+
+## Run Phase 1 connector tests and sample
+
+Fetch the bounded Phase 1 sample set and save raw JSON plus its source/coverage/licence manifest locally:
+
+```powershell
+python -m eurogrid.sample
+```
+
+By default, the sample covers 1–2 January 2025 for market/weather endpoints and PVGIS hourly output for 2020. It requests DE-LU day-ahead prices, all-Europe public generation (`country=all`), Berlin weather, Paris annual and hourly solar output, and the selected Eurostat household-price dimensions across all geographies the dataset returns. Responses are saved under `data/raw/phase1/`, which is gitignored because source data may carry redistribution conditions. The command runs requests sequentially and prints each response's geography, period, unit, resolution and licence note. Use `--output`, `--start`, `--end` and `--pvgis-year` to change the sample.
+
+The HTTP client only performs GET requests. It retries timeouts, network errors and transient 429/5xx responses a bounded number of times, honoring `Retry-After` when supplied. It does not retry ordinary 4xx errors.
 
 ## Data and security rules
 
@@ -50,6 +64,6 @@ These tests check the all-Europe generation selector, zone-scoped prices, licenc
 - Wholesale prices are not household retail tariffs.
 - Simulated household profiles and financial assumptions must be labeled as such.
 
-## Next phase
+## Current limits
 
-Stop after Phase 0. Once its exit criteria are met, Phase 1 will design reusable API clients and connector contracts from the actual response shapes and licence metadata.
+Day-ahead prices are zone-scoped and licensed per response; the sample only requests DE-LU. Generation uses the provider-supported all-Europe selector, but that does not guarantee every country/fuel/interval is complete. The sample runner records source terms and raw responses for inspection. ENTSO-E still requires a separately requested user token and is not included. These connectors are proof-of-concept only and do not yet load Parquet, DuckDB or dbt.
