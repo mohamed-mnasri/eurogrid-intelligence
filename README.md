@@ -56,6 +56,10 @@ By default, the sample covers 1–2 January 2025 for market/weather endpoints an
 
 The HTTP client only performs GET requests. It retries timeouts, network errors and transient 429/5xx responses a bounded number of times, honoring `Retry-After` when supplied. It does not retry ordinary 4xx errors.
 
+## Phase 2 ingestion
+
+Use `python -m eurogrid.cli --help` or follow the [Phase 2 guide](docs/phase2.md) for single-connector ingestion, bounded backfills, request caching, raw content-addressed storage and the SQLite run ledger.
+
 ## Data and security rules
 
 - Treat source terms and returned licence metadata as authoritative for each dataset.
