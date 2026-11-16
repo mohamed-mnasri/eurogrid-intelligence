@@ -42,7 +42,7 @@ In the VS Code terminal, activate `.venv` as above and run the offline unit test
 python -m unittest discover -s tests -v
 ```
 
-The tests cover both phases, including request parameters, response validation, retry behavior, source metadata, missing values and saving the provenance manifest. They do not call any API. To repeat the Phase 0 connectivity checks separately, run `python scripts/phase0_probe.py` (this makes public read-only API requests).
+The tests cover the implemented phases, including request parameters, response validation, retry behavior, source metadata, idempotent ingestion, timezone transitions and normalized facts. They do not call any API. To repeat the Phase 0 connectivity checks separately, run `python scripts/phase0_probe.py` (this makes public read-only API requests).
 
 ## Run Phase 1 connector tests and sample
 
@@ -59,6 +59,10 @@ The HTTP client only performs GET requests. It retries timeouts, network errors 
 ## Phase 2 ingestion
 
 Use `python -m eurogrid.cli --help` or follow the [Phase 2 guide](docs/phase2.md) for single-connector ingestion, bounded backfills, request caching, raw content-addressed storage and the SQLite run ledger.
+
+## Phase 3 normalization
+
+Install dependencies with `python -m pip install -r requirements.txt`, then follow the [Phase 3 guide](docs/phase3.md) to create and inspect the local DuckDB model.
 
 ## Data and security rules
 
