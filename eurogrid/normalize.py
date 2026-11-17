@@ -1,11 +1,17 @@
-"""Normalize Bronze JSON samples into DuckDB dimensions and fact tables."""
+"""Build the Phase 3 Silver layer from immutable Bronze JSON samples.
+
+The normalizer maps geography, timestamps and units into analytical DuckDB
+tables while keeping source timestamps, units, hashes, and quality statuses.
+"""
 
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import json
 import math
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -13,14 +19,22 @@ from zoneinfo import ZoneInfo
 
 import duckdb
 
-NON_GENERATION = {"load", "residual_load", "renewable_share_of_load", "renewable_share_of_generation",
-                  "cross_border_electricity_trading", "hydro_pumped_storage_consumption", "battery_consumption"}
+# These series are ratios or consumption measures, not generation or trade/load.
+# Demand and net cross-border trading are retained with the other public-power
+# series so Phase 4 can model them separately by their stable source series ID.
+NON_GENERATION = {"residual_load", "renewable_share_of_load", "renewable_share_of_generation",
+                  "hydro_pumped_storage_consumption", "battery_consumption", "hydro_pumped_storage", "battery"}
 WEATHER_VARIABLES = {"temperature_2m": ("temperature", "°C"), "wind_speed_10m": ("wind_speed", "m/s"),
                      "shortwave_radiation": ("shortwave_radiation", "W/m²")}
 
 
 def parse_timestamp(value: str, source_timezone: str | None = None, previous_utc: datetime | None = None) -> tuple[datetime | None, str | None, str | None]:
-    """Return UTC time, original zone label, and parse error; resolve duplicated naive DST hours in sequence."""
+    """Return UTC time, source zone/offset, and parse error for one observation.
+
+    For naive timestamps, use the IANA source zone and the previous UTC value to
+    disambiguate repeated fall-back hours. Nonexistent spring-forward hours are
+    returned as errors rather than guessed.
+    """
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except (TypeError, ValueError):
@@ -50,6 +64,7 @@ def parse_timestamp(value: str, source_timezone: str | None = None, previous_utc
 
 
 def classify(value: Any, stale: bool = False) -> tuple[float | None, str]:
+    """Keep missing, valid zero/nonzero, invalid, and explicitly stale distinct."""
     if stale:
         return None, "stale"
     if value is None:
@@ -64,6 +79,7 @@ def classify(value: Any, stale: bool = False) -> tuple[float | None, str]:
 
 
 def convert(value: float | None, unit: str | None, target: str) -> float | None:
+    """Convert the source units used by this project to its normalized units."""
     if value is None:
         return None
     unit_norm = (unit or "").strip().lower().replace(" ", "")
@@ -79,11 +95,15 @@ def convert(value: float | None, unit: str | None, target: str) -> float | None:
 
 
 def _key(*parts: Any) -> str:
+    """Create a stable natural-key hash from a fact's identity fields."""
     return hashlib.sha256(json.dumps(parts, sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()
 
 
 class Normalizer:
+    """Create Silver tables/views and load supported provider samples."""
+
     def __init__(self, db_path: Path = Path("data/eurogrid.duckdb")) -> None:
+        """Open DuckDB and initialize the geography and fact structures."""
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self.db = duckdb.connect(str(db_path))
         self.db.execute("""CREATE TABLE IF NOT EXISTS dim_geography(
@@ -113,20 +133,43 @@ class Normalizer:
           FROM fct_market_price p LEFT JOIN fct_weather w USING(interval_start_utc)""")
 
     def close(self) -> None:
+        """Close the DuckDB connection after loading or inspection."""
         self.db.close()
 
     def _geography(self, geography_type: str, code: str | None = None, *, country: str | None = None,
                    zone: str | None = None, lat: float | None = None, lon: float | None = None,
                    source: str = "") -> str:
+        """Upsert one distinct geography entity and return its stable key."""
         gid = _key(geography_type, code, country, zone, lat, lon)
         self.db.execute("""INSERT OR REPLACE INTO dim_geography VALUES (?,?,?,?,?,?,?,?,?)""",
           [gid, geography_type, code, code, country, zone, lat, lon, source])
         return gid
 
     def _files(self, raw_dir: Path) -> list[Path]:
+        """Find JSON samples recursively while skipping their small manifests."""
         return sorted(p for p in raw_dir.rglob("*.json") if p.name != "manifest.json")
 
+    def _bulk_insert(self, table: str, columns: tuple[str, ...], records: list[list[Any]]) -> None:
+        """Bulk-load normalized rows through CSV to avoid slow row-by-row inserts."""
+        if not records:
+            return
+        # DuckDB's CSV reader is a fast built-in bulk loader; no extra dataframe
+        # dependency is needed. The target table performs final type conversion.
+        with tempfile.NamedTemporaryFile(mode="w", newline="", encoding="utf-8", suffix=".csv", delete=False) as temp:
+            writer = csv.writer(temp)
+            writer.writerow(columns)
+            writer.writerows(records)
+            temp_path = Path(temp.name)
+        try:
+            self.db.execute(
+                f"INSERT OR REPLACE INTO {table} SELECT * FROM read_csv(?, header=true, all_varchar=true, nullstr='')",
+                [str(temp_path)],
+            )
+        finally:
+            temp_path.unlink(missing_ok=True)
+
     def load_directory(self, raw_dir: Path) -> dict[str, int]:
+        """Transactionally load supported price, generation, and weather samples."""
         counts = {"market_price": 0, "generation": 0, "weather": 0, "files": 0}
         self.db.execute("BEGIN TRANSACTION")
         try:
@@ -152,12 +195,14 @@ class Normalizer:
         return counts
 
     def _source(self, sample: dict[str, Any]) -> tuple[str, str, int]:
+        """Read source unit, timezone, and interval length from sample metadata."""
         meta, payload = sample.get("metadata", {}), sample.get("payload", {})
         unit = meta.get("unit") or payload.get("unit")
         mins = meta.get("interval_minutes") or payload.get("interval_minutes") or 60
         return str(unit or ""), str(meta.get("timezone") or payload.get("timezone") or "UTC"), int(mins)
 
     def load_prices(self, sample: dict[str, Any], raw_sha: str = "") -> int:
+        """Upsert price intervals with their bidding-zone identity and provenance."""
         payload = sample["payload"]
         geography = payload.get("bidding_zone") or sample.get("metadata", {}).get("geography", {}).get("bidding_zone") or "unknown"
         country = payload.get("country")
@@ -167,6 +212,7 @@ class Normalizer:
         unit, zone, mins = self._source(sample)
         previous = None
         count = 0
+        records = []
         for row in payload.get("data", []):
             timestamp = row.get("timestamp")
             utc, tz_label, time_error = parse_timestamp(timestamp, zone, previous)
@@ -179,18 +225,24 @@ class Normalizer:
             if utc is None:
                 continue
             key = _key(sample["provider"], geography, "day_ahead_price", utc, mins)
-            self.db.execute("INSERT OR REPLACE INTO fct_market_price VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [key, gid, utc, utc + timedelta(minutes=mins), mins, timestamp, tz_label, value, unit, convert(value, unit, "EUR/MWh"), "EUR/MWh", status, sample["provider"], sample["dataset"], raw_sha, "day_ahead_price"])
+            records.append([key, gid, utc, utc + timedelta(minutes=mins), mins, timestamp, tz_label, value, unit, convert(value, unit, "EUR/MWh"), "EUR/MWh", status, sample["provider"], sample["dataset"], raw_sha, "day_ahead_price"])
             count += 1
+        self._bulk_insert("fct_market_price", ("fact_key", "geography_id", "interval_start_utc", "interval_end_utc",
+            "interval_minutes", "original_timestamp", "source_timezone", "original_value", "original_unit", "value",
+            "unit", "data_status", "provider", "dataset", "raw_sha256", "series_id"), records)
         return count
 
     def load_generation(self, sample: dict[str, Any], raw_sha: str = "") -> int:
+        """Upsert generation series, excluding non-generation measures."""
         payload = sample["payload"]
         geography = payload.get("country") or "all"
-        gid = self._geography("country" if geography != "all" else "europe_aggregate", geography, source=sample["provider"])
+        gid = self._geography("country" if geography != "all" else "europe_aggregate", geography,
+                              country=geography if geography != "all" else None, source=sample["provider"])
         unit, zone, mins = self._source(sample)
         series = [s.get("id") for s in sample.get("metadata", {}).get("series", []) if s.get("id") not in NON_GENERATION]
         previous = None
         count = 0
+        records = []
         for row in payload.get("data", []):
             timestamp = row.get("timestamp")
             utc, tz_label, _ = parse_timestamp(timestamp, zone, previous)
@@ -204,20 +256,26 @@ class Normalizer:
                 original = row["values"][production_type]
                 value, status = classify(original)
                 key = _key(sample["provider"], geography, production_type, utc, mins)
-                self.db.execute("INSERT OR REPLACE INTO fct_generation VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [key, gid, utc, utc + timedelta(minutes=mins), mins, timestamp, tz_label, production_type, value, unit, convert(value, unit, "MW"), "MW", status, sample["provider"], sample["dataset"], raw_sha])
+                records.append([key, gid, utc, utc + timedelta(minutes=mins), mins, timestamp, tz_label, production_type, value, unit, convert(value, unit, "MW"), "MW", status, sample["provider"], sample["dataset"], raw_sha])
                 count += 1
+        self._bulk_insert("fct_generation", ("fact_key", "geography_id", "interval_start_utc", "interval_end_utc",
+            "interval_minutes", "original_timestamp", "source_timezone", "production_type", "original_value",
+            "original_unit", "value", "unit", "data_status", "provider", "dataset", "raw_sha256"), records)
         return count
 
     def load_weather(self, sample: dict[str, Any], raw_sha: str = "") -> int:
+        """Upsert coordinate weather observations and standardize their units."""
         payload = sample["payload"]
         hourly = payload.get("hourly", {})
         meta = sample.get("metadata", {}).get("geography", {})
         lat, lon = meta.get("latitude", payload.get("latitude")), meta.get("longitude", payload.get("longitude"))
-        gid = self._geography("coordinate", f"{lat},{lon}", lat=lat, lon=lon, source=sample["provider"])
+        country_code = meta.get("country_code")
+        gid = self._geography("coordinate", f"{lat},{lon}", country=country_code, lat=lat, lon=lon, source=sample["provider"])
         source_zone = sample.get("metadata", {}).get("timezone") or payload.get("timezone") or "UTC"
         mins = int(sample.get("metadata", {}).get("interval_minutes") or 60)
         previous = None
         count = 0
+        records = []
         for i, timestamp in enumerate(hourly.get("time", [])):
             utc, tz_label, _ = parse_timestamp(timestamp, source_zone, previous)
             if utc is not None:
@@ -232,12 +290,16 @@ class Normalizer:
                 stale_flags = hourly.get(f"{name}_stale", [])
                 value, status = classify(original, bool(stale_flags[i]) if i < len(stale_flags) else False)
                 key = _key(sample["provider"], gid, variable, utc, mins)
-                self.db.execute("INSERT OR REPLACE INTO fct_weather VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [key, gid, utc, utc + timedelta(minutes=mins), mins, timestamp, tz_label, variable, value, original_unit, convert(value, original_unit, target_unit), target_unit, status, sample["provider"], sample["dataset"], raw_sha])
+                records.append([key, gid, utc, utc + timedelta(minutes=mins), mins, timestamp, tz_label, variable, value, original_unit, convert(value, original_unit, target_unit), target_unit, status, sample["provider"], sample["dataset"], raw_sha])
                 count += 1
+        self._bulk_insert("fct_weather", ("fact_key", "geography_id", "interval_start_utc", "interval_end_utc",
+            "interval_minutes", "original_timestamp", "source_timezone", "variable", "original_value", "original_unit",
+            "value", "unit", "data_status", "provider", "dataset", "raw_sha256"), records)
         return count
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Load supported samples into the configured local DuckDB file."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--raw", type=Path, default=Path("data/raw"))
     parser.add_argument("--database", type=Path, default=Path("data/eurogrid.duckdb"))

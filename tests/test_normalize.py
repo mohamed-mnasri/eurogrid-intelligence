@@ -91,6 +91,25 @@ class NormalizeTests(unittest.TestCase):
         self.assertEqual(classify("NaN"), (None, "invalid"))
         self.assertEqual(classify(12, stale=True), (None, "stale"))
 
+    def test_public_power_keeps_demand_and_cross_border_series_for_separate_marts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            norm = Normalizer(Path(tmp) / "series.duckdb")
+            sample = {"provider": "energy-charts", "dataset": "public_power", "metadata": {
+                "timezone": "UTC", "interval_minutes": 60, "unit": "MW",
+                "geography": {"country": "de"}, "series": [
+                    {"id": "solar"}, {"id": "load"}, {"id": "cross_border_electricity_trading"},
+                    {"id": "renewable_share_of_load"}, {"id": "battery_consumption"}]},
+                "payload": {"country": "de", "unit": "MW", "timezone": "UTC", "interval_minutes": 60,
+                    "data": [{"timestamp": "2025-01-01T00:00Z", "values": {"solar": 2, "load": 10,
+                    "cross_border_electricity_trading": -1, "renewable_share_of_load": 20,
+                    "battery_consumption": 0}}]}}
+            try:
+                self.assertEqual(norm.load_generation(sample), 3)
+                self.assertEqual(norm.db.execute("SELECT production_type FROM fct_generation ORDER BY production_type").fetchall(),
+                                 [("cross_border_electricity_trading",), ("load",), ("solar",)])
+            finally:
+                norm.close()
+
 
 if __name__ == "__main__":
     unittest.main()

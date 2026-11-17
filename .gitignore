@@ -15,6 +15,9 @@ data/
 *.duckdb
 *.db
 *.parquet
+logs/
+target/
+dbt_packages/
 
 # Editor / OS
 .vscode/*

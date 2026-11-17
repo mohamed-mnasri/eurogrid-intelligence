@@ -1,0 +1,112 @@
+version: 2
+
+models:
+  - name: energy_market_hourly
+    description: >
+      Exploratory time-aligned view of DE-LU day-ahead prices, all-Europe
+      generation, and Berlin-coordinate weather. Geography scopes differ;
+      matching timestamps do not imply geographic equivalence. The row grain
+      is one price interval crossed with each available generation series and
+      weather variable; use the separate gold models for charting.
+    columns:
+      - name: price_fact_key
+        description: Stable identifier for the source price observation.
+        data_tests:
+          - not_null
+
+      - name: interval_start_utc
+        description: Start of the interval, represented in UTC.
+        data_tests:
+          - not_null
+
+      - name: price_unit
+        description: Price unit; expected to be EUR/MWh.
+
+      - name: generation_mw
+        description: Generation measurement in megawatts. May be null.
+
+      - name: weather_value
+        description: Weather measurement; see weather_unit for its unit. May be null.
+
+      - name: price_status
+        description: Quality status attached to the source price observation.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['valid', 'missing', 'invalid', 'stale']
+
+      - name: generation_status
+        description: Quality status attached to the source generation observation.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['valid', 'missing', 'invalid', 'stale']
+
+      - name: weather_status
+        description: Quality status attached to the source weather observation.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['valid', 'missing', 'invalid', 'stale']
+
+  - name: gold_market_price
+    description: One row per bidding-zone price interval, with geography and provenance.
+    columns:
+      - name: fact_key
+        data_tests: [not_null, unique]
+      - name: interval_start_utc
+        data_tests: [not_null]
+      - name: bidding_zone
+        data_tests: [not_null]
+      - name: price_eur_per_mwh
+        description: Day-ahead market price in EUR/MWh.
+
+  - name: gold_generation_mix
+    description: One row per geography, production type, and interval; standardized in MW.
+    columns:
+      - name: fact_key
+        data_tests: [not_null, unique]
+      - name: interval_start_utc
+        data_tests: [not_null]
+      - name: generation_mw
+        description: Public generation power in MW; null means unavailable or invalid.
+
+  - name: gold_demand
+    description: Public-power load series in MW at each reported interval.
+    columns:
+      - name: fact_key
+        data_tests: [not_null, unique]
+      - name: demand_mw
+        description: Provider-reported load power in MW, not interval energy.
+
+  - name: gold_cross_border_flow
+    description: Provider-reported net scheduled cross-border trading series in MW.
+    columns:
+      - name: fact_key
+        data_tests: [not_null, unique]
+      - name: net_cross_border_trading_mw
+        description: Signed value as supplied by Energy-Charts; sign is not reinterpreted.
+
+  - name: gold_weather
+    description: Weather observations at coordinate locations, not whole-country averages.
+    columns:
+      - name: fact_key
+        data_tests: [not_null, unique]
+      - name: interval_start_utc
+        data_tests: [not_null]
+
+  - name: gold_market_coverage
+    description: Observed price coverage used to populate the selectable market list.
+    columns:
+      - name: bidding_zone
+        data_tests: [not_null, unique]
+      - name: price_interval_count
+        data_tests: [not_null]
+
+  - name: gold_price_hourly_baseline
+    description: Mean price by UTC hour across each zone's available valid observations.
+    columns:
+      - name: geography_id
+        data_tests: [not_null]
+      - name: utc_hour
+        data_tests: [not_null]

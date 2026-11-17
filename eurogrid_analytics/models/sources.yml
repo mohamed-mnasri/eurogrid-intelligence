@@ -1,0 +1,26 @@
+version: 2
+
+sources:
+  - name: eurogrid
+    description: >
+      Normalized source tables created by the EuroGrid Phase 3 Python loader.
+      These tables live in the existing DuckDB database.
+    schema: main
+    tables:
+      - name: dim_geography
+        description: Countries, bidding zones, Europe-wide aggregates, and weather locations.
+
+      - name: fct_market_price
+        description: >
+          Day-ahead market price intervals. Values are normalized to EUR/MWh.
+          Geography is a bidding zone, such as DE-LU.
+
+      - name: fct_generation
+        description: >
+          Electricity generation observations normalized to MW. The sample
+          currently includes an all-Europe aggregate.
+
+      - name: fct_weather
+        description: >
+          Weather observations for a coordinate location. Temperature is °C,
+          wind speed is m/s, and shortwave radiation is W/m².

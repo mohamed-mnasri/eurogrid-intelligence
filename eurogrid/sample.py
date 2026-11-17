@@ -1,4 +1,8 @@
-"""Fetch the bounded Phase 1 source set and write raw JSON plus a manifest."""
+"""Run a small source survey and save original JSON with a provenance manifest.
+
+This is a reproducible connectivity/schema sample, separate from the Phase 2
+incremental ingestion CLI.
+"""
 
 from __future__ import annotations
 
@@ -19,6 +23,7 @@ from eurogrid.http import HttpJsonClient
 
 
 def _safe_name(value: str) -> str:
+    """Convert a provider/dataset label into a portable filename component."""
     cleaned = re.sub(r"[^a-zA-Z0-9_-]+", "_", value).strip("_").lower()
     if not cleaned:
         raise ValueError("sample name must contain letters or digits")
@@ -26,6 +31,7 @@ def _safe_name(value: str) -> str:
 
 
 def write_sample(sample: SourceSample, output_dir: Path) -> Path:
+    """Write one complete source sample atomically as indented JSON."""
     output_dir.mkdir(parents=True, exist_ok=True)
     name = _safe_name(f"{sample.provider}_{sample.dataset}")
     destination = output_dir / f"{name}.json"
@@ -36,6 +42,7 @@ def write_sample(sample: SourceSample, output_dir: Path) -> Path:
 
 
 def save_manifest(samples: list[SourceSample], files: list[Path], output_dir: Path) -> Path:
+    """Write an at-a-glance index of each sample's coverage and attribution."""
     manifest = {
         "project": "EuroGrid Intelligence",
         "phase": 1,
@@ -67,6 +74,7 @@ def save_manifest(samples: list[SourceSample], files: list[Path], output_dir: Pa
 
 
 def _format_units(units: Any) -> str:
+    """Format provider unit metadata for concise terminal output."""
     if not isinstance(units, dict):
         return str(units)
     if "monthly" in units or "totals" in units:
@@ -84,6 +92,7 @@ def _format_units(units: Any) -> str:
 
 
 def fetch_phase1_samples(start: str, end: str, pvgis_year: int) -> list[SourceSample]:
+    """Fetch the bounded demonstration set sequentially to respect rate limits."""
     with HttpJsonClient(timeout_seconds=30, max_retries=2) as client:
         energy = EnergyChartsConnector(client)
         weather = OpenMeteoConnector(client)
@@ -101,6 +110,7 @@ def fetch_phase1_samples(start: str, end: str, pvgis_year: int) -> list[SourceSa
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Parse sample options, fetch source responses, and write them locally."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--start", default="2025-01-01", help="Start date for market and weather samples")
     parser.add_argument("--end", default="2025-01-02", help="End date for market and weather samples (inclusive, provider-specific)")

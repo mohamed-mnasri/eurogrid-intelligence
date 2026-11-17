@@ -1,4 +1,9 @@
-"""Content-addressed raw storage, request caching, and an SQLite run ledger."""
+"""Phase 2 Bronze storage, request caching, and ingestion-run tracking.
+
+The raw response is kept in a content-addressed path so source changes never
+overwrite old snapshots. A request cache avoids unnecessary repeat calls, and
+SQLite records a row for every attempted run, including failures.
+"""
 
 from __future__ import annotations
 
@@ -14,15 +19,18 @@ from typing import Any, Callable
 
 
 def canonical_json(value: Any) -> str:
+    """Serialize JSON with stable key ordering for repeatable content hashes."""
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
 def request_key(sample: dict[str, Any]) -> str:
+    """Hash the provider, dataset, endpoint, and parameters for a request."""
     identity = {key: sample.get(key) for key in ("provider", "dataset", "endpoint", "request_parameters")}
     return hashlib.sha256(canonical_json(identity).encode()).hexdigest()
 
 
 def count_rows(sample: dict[str, Any]) -> int:
+    """Count the provider's top-level observations without reshaping them."""
     payload = sample.get("payload", {})
     if isinstance(payload.get("data"), list):
         return len(payload["data"])
@@ -41,14 +49,16 @@ def count_rows(sample: dict[str, Any]) -> int:
 
 
 def _slug(value: Any) -> str:
+    """Make a readable and filesystem-safe folder label."""
     text = re.sub(r"[^A-Za-z0-9_-]+", "_", str(value or "unknown")).strip("_").lower()
     return text or "unknown"
 
 
 def geography_label(sample: dict[str, Any]) -> str:
+    """Choose a location label from response metadata or request parameters."""
     geography = sample.get("metadata", {}).get("geography")
     if isinstance(geography, dict):
-        return geography.get("bidding_zone") or geography.get("country") or geography.get("selection") or "all"
+        return geography.get("bidding_zone") or geography.get("country") or geography.get("country_code") or geography.get("selection") or "all"
     if isinstance(geography, str):
         return geography
     params = sample.get("request_parameters", {})
@@ -56,6 +66,7 @@ def geography_label(sample: dict[str, Any]) -> str:
 
 
 def period_label(sample: dict[str, Any]) -> tuple[str, str]:
+    """Return the year and month used to partition a saved response."""
     period = sample.get("metadata", {}).get("period") or {}
     params = sample.get("request_parameters", {})
     start = period.get("start") if isinstance(period, dict) else None
@@ -70,6 +81,7 @@ def period_label(sample: dict[str, Any]) -> tuple[str, str]:
 
 @dataclass
 class IngestionResult:
+    """Summary of where an ingested response was saved and whether cached."""
     path: Path
     raw_sha256: str
     request_sha256: str
@@ -78,7 +90,10 @@ class IngestionResult:
 
 
 class IngestionStore:
+    """Persist raw API samples and an SQLite record for each ingestion attempt."""
+
     def __init__(self, root: Path = Path("data"), cache_ttl_hours: int = 24) -> None:
+        """Prepare the data directories and create the run-ledger schema."""
         self.root = root
         self.cache_ttl_hours = cache_ttl_hours
         self.db_path = root / "metadata" / "ingestion_runs.sqlite3"
@@ -93,10 +108,12 @@ class IngestionStore:
             db.execute("CREATE INDEX IF NOT EXISTS idx_ingestion_request ON ingestion_run(request_sha256)")
 
     def _connect(self) -> sqlite3.Connection:
+        """Open a short-lived ledger connection."""
         return sqlite3.connect(self.db_path)
 
     @contextmanager
     def connection(self):
+        """Yield a ledger connection and always close it, including on errors."""
         db = self._connect()
         try:
             yield db
@@ -105,12 +122,14 @@ class IngestionStore:
             db.close()
 
     def _raw_path(self, sample: dict[str, Any], request_sha: str, raw_sha: str) -> Path:
+        """Build the provider/dataset/place/date partition path for one version."""
         year, month = period_label(sample)
         return (self.root / "raw" / f"provider={_slug(sample.get('provider'))}" /
                 f"dataset={_slug(sample.get('dataset'))}" / f"geography={_slug(geography_label(sample))}" /
                 f"year={year}" / f"month={month}" / f"request={request_sha[:16]}" / f"response_{raw_sha}.json")
 
     def ingest(self, fetch: Callable[[], Any], *, identity: dict[str, Any] | None = None, force_refresh: bool = False) -> IngestionResult:
+        """Use a fresh cache entry or fetch, save the raw version, and log outcome."""
         started = datetime.now(timezone.utc).isoformat()
         sample: dict[str, Any] | None = None
         cache_hit = False
@@ -170,6 +189,7 @@ class IngestionStore:
                     status, rows, error, int(cache_hit), raw_sha, str(raw_path) if raw_path else None))
 
     def stats(self) -> dict[str, int]:
+        """Summarize attempted runs, successful runs, and distinct raw versions."""
         with self.connection() as db:
             runs, successes, raw_versions = db.execute("SELECT COUNT(*), SUM(status='success'), COUNT(DISTINCT raw_sha256) FROM ingestion_run").fetchone()
         return {"runs": runs, "successful_runs": successes or 0, "raw_versions": raw_versions}

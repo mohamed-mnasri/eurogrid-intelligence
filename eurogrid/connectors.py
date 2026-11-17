@@ -1,4 +1,9 @@
-"""Phase 1, read-only public-source connectors and response metadata."""
+"""Read-only provider adapters that return validated payloads with provenance.
+
+Each connector translates project-friendly arguments into one provider request,
+checks the response shape, and wraps it with request, geography, unit, and
+licensing metadata. Connectors do not write files or transform observations.
+"""
 
 from __future__ import annotations
 
@@ -25,6 +30,7 @@ SOURCE_TERMS = {
 
 @dataclass(frozen=True)
 class SourceSample:
+    """One original API payload together with enough context to reproduce it."""
     provider: str
     dataset: str
     endpoint: str
@@ -34,6 +40,7 @@ class SourceSample:
     payload: dict[str, Any]
 
     def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serializable representation for storage and tests."""
         return asdict(self)
 
 
@@ -46,6 +53,7 @@ def _sample(
     metadata: dict[str, Any],
     payload: dict[str, Any],
 ) -> SourceSample:
+    """Add common request time and provider terms to a connector response."""
     return SourceSample(
         provider=provider,
         dataset=dataset,
@@ -58,10 +66,14 @@ def _sample(
 
 
 class EnergyChartsConnector:
+    """Access Energy-Charts market prices and public electricity data."""
+
     def __init__(self, client: HttpJsonClient) -> None:
+        """Use the shared HTTP client for provider requests."""
         self.client = client
 
     def price(self, bidding_zone: str, start: str, end: str) -> SourceSample:
+        """Fetch day-ahead prices for one provider-supported bidding zone."""
         params = {"bzn": bidding_zone, "start": start, "end": end}
         payload = self.client.get_json(f"{ENERGY_CHARTS}/v2/price", params=params)
         if not isinstance(payload.get("data"), list) or not payload.get("license"):
@@ -86,6 +98,7 @@ class EnergyChartsConnector:
         )
 
     def public_power(self, country: str, start: str, end: str) -> SourceSample:
+        """Fetch public production series for a country or the Europe aggregate."""
         params = {"country": country, "start": start, "end": end}
         payload = self.client.get_json(f"{ENERGY_CHARTS}/v2/public_power", params=params)
         if not isinstance(payload.get("data"), list) or not isinstance(payload.get("series"), list):
@@ -112,7 +125,10 @@ class EnergyChartsConnector:
 
 
 class OpenMeteoConnector:
+    """Access hourly historical weather for a coordinate location."""
+
     def __init__(self, client: HttpJsonClient) -> None:
+        """Use the shared HTTP client for archive requests."""
         self.client = client
 
     def historical(
@@ -122,7 +138,9 @@ class OpenMeteoConnector:
         start: str,
         end: str,
         variables: tuple[str, ...] = ("temperature_2m", "wind_speed_10m", "shortwave_radiation"),
+        country_code: str | None = None,
     ) -> SourceSample:
+        """Fetch requested hourly weather variables in UTC."""
         params = {
             "latitude": latitude,
             "longitude": longitude,
@@ -144,7 +162,7 @@ class OpenMeteoConnector:
             endpoint="/v1/archive",
             parameters=params,
             metadata={
-                "geography": {"latitude": payload.get("latitude"), "longitude": payload.get("longitude"), "elevation_m": payload.get("elevation")},
+                "geography": {"latitude": payload.get("latitude"), "longitude": payload.get("longitude"), "elevation_m": payload.get("elevation"), "country_code": country_code},
                 "period": {"start": hourly["time"][0] if hourly["time"] else None, "end": hourly["time"][-1] if hourly["time"] else None},
                 "timezone": payload.get("timezone"),
                 "resolution": "PT1H",
@@ -159,10 +177,14 @@ class OpenMeteoConnector:
 
 
 class PVGISConnector:
+    """Access JRC PVGIS solar-yield and hourly reference services."""
+
     def __init__(self, client: HttpJsonClient) -> None:
+        """Use the shared HTTP client for PVGIS requests."""
         self.client = client
 
     def annual_pv_output(self, latitude: float, longitude: float, peak_power_kw: float = 1.0, loss_percent: float = 14.0) -> SourceSample:
+        """Fetch long-term monthly and annual yield estimates for a PV setup."""
         params = {"lat": latitude, "lon": longitude, "peakpower": peak_power_kw, "loss": loss_percent, "outputformat": "json"}
         payload = self.client.get_json(f"{PVGIS}/PVcalc", params=params)
         outputs = payload.get("outputs")
@@ -204,6 +226,7 @@ class PVGISConnector:
         peak_power_kw: float = 1.0,
         loss_percent: float = 14.0,
     ) -> SourceSample:
+        """Fetch one calendar year's hourly PVGIS reference series."""
         params = {
             "lat": latitude,
             "lon": longitude,
@@ -245,7 +268,10 @@ class PVGISConnector:
 
 
 class EurostatConnector:
+    """Access Eurostat's household electricity-price dataset."""
+
     def __init__(self, client: HttpJsonClient) -> None:
+        """Use the shared HTTP client for Eurostat requests."""
         self.client = client
 
     def household_prices(
@@ -255,6 +281,7 @@ class EurostatConnector:
         tax: str = "I_TAX",
         currency: str = "EUR",
     ) -> SourceSample:
+        """Fetch a consumption band, optionally restricted to one geography."""
         params = {
             "format": "JSON",
             "lang": "en",

@@ -1,4 +1,8 @@
-"""Small verified-HTTPS JSON client with bounded GET retries."""
+"""HTTP transport shared by the provider connectors.
+
+The client centralizes HTTPS verification, timeouts, and safe retries so that
+individual source connectors only need to describe their endpoint requests.
+"""
 
 from __future__ import annotations
 
@@ -18,6 +22,7 @@ RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 
 
 def _retry_after_seconds(value: str | None, now: datetime | None = None) -> float | None:
+    """Parse either Retry-After format, returning None when it is unusable."""
     if not value:
         return None
     try:
@@ -49,6 +54,7 @@ class HttpJsonClient:
         sleep: Callable[[float], None] = time.sleep,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
+        """Create a reusable HTTP client; transport and sleep are injectable for tests."""
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
         if max_retries < 0:
@@ -64,6 +70,7 @@ class HttpJsonClient:
         )
 
     def get_json(self, url: str, *, params: dict[str, Any] | None = None) -> Any:
+        """GET a JSON response and retry only transient network/server failures."""
         for attempt in range(self._max_retries + 1):
             try:
                 response = self._client.get(url, params=params)
@@ -86,10 +93,13 @@ class HttpJsonClient:
         raise RuntimeError("GET retry loop exited unexpectedly")
 
     def close(self) -> None:
+        """Release the underlying HTTP connection pool."""
         self._client.close()
 
     def __enter__(self) -> "HttpJsonClient":
+        """Allow the client to be managed with a ``with`` statement."""
         return self
 
     def __exit__(self, *_: object) -> None:
+        """Close the connection pool when leaving a context manager."""
         self.close()
