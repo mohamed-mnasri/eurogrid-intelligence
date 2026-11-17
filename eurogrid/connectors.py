@@ -290,6 +290,7 @@ class EurostatConnector:
             "tax": tax,
             "currency": currency,
             "unit": "KWH",
+            "siec": "E7000",
         }
         if geography is not None:
             params["geo"] = geography
@@ -318,5 +319,43 @@ class EurostatConnector:
                 "dimension_sizes": payload.get("size"),
                 "selected_dimensions": {"nrg_cons": consumption_band, "unit": "KWH", "tax": tax, "currency": currency},
             },
+            payload=payload,
+        )
+
+    def household_electricity_consumption(self, geography: str) -> SourceSample:
+        """Fetch annual household electricity use for a country or EU aggregate."""
+        params = {"lang": "en", "freq": "A", "nrg_bal": "FC_OTH_HH_E",
+                  "siec": "E7000", "unit": "GWH", "geo": geography,
+                  "sinceTimePeriod": "2020"}
+        payload = self.client.get_json(
+            "https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/nrg_cb_e",
+            params=params,
+        )
+        if payload.get("class") != "dataset" or not isinstance(payload.get("value"), dict):
+            raise ValueError("Eurostat household electricity response is missing dataset values")
+        return _sample(
+            provider="eurostat", dataset="nrg_cb_e_household_electricity_consumption",
+            endpoint="/statistics/1.0/data/nrg_cb_e", parameters=params,
+            metadata={"geography": geography, "resolution": "P1Y", "unit": "GWh",
+                      "license_note": "Eurostat statistical-data reuse policy applies; cite dataset nrg_cb_e.",
+                      "attribution": "Eurostat, dataset nrg_cb_e", "updated": payload.get("updated")},
+            payload=payload,
+        )
+
+    def population(self, geography: str) -> SourceSample:
+        """Fetch annual population so household kWh can be expressed per person."""
+        params = {"lang": "en", "freq": "A", "age": "TOTAL", "sex": "T",
+                  "unit": "NR", "geo": geography, "sinceTimePeriod": "2020"}
+        payload = self.client.get_json(
+            "https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/demo_pjan",
+            params=params,
+        )
+        if payload.get("class") != "dataset" or not isinstance(payload.get("value"), dict):
+            raise ValueError("Eurostat population response is missing dataset values")
+        return _sample(
+            provider="eurostat", dataset="demo_pjan_population", endpoint="/statistics/1.0/data/demo_pjan",
+            parameters=params, metadata={"geography": geography, "resolution": "P1Y", "unit": "persons",
+                                         "license_note": "Eurostat statistical-data reuse policy applies; cite dataset demo_pjan.",
+                                         "attribution": "Eurostat, dataset demo_pjan", "updated": payload.get("updated")},
             payload=payload,
         )

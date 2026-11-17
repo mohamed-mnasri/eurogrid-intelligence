@@ -11,6 +11,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from eurogrid.market_service import MarketDataError, MarketService
+from eurogrid.household_service import household_benchmark
 
 
 def create_app(database_path: Path | None = None) -> FastAPI:
@@ -33,6 +34,17 @@ def create_app(database_path: Path | None = None) -> FastAPI:
             return {"markets": MarketService(db_path).coverage()}
         except MarketDataError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.get("/api/household-benchmark")
+    def household_reference(geo: str = Query(min_length=2, max_length=16)) -> dict[str, Any]:
+        """Return Eurostat per-person use and tax-inclusive household-price references."""
+        allowed = {"EU27_2020", "DE", "FR", "ES", "PL", "NL", "UK"}
+        if geo not in allowed:
+            raise HTTPException(status_code=404, detail="No Eurostat benchmark configured for this geography")
+        try:
+            return household_benchmark(geo)
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail=f"Eurostat benchmark data is unavailable: {exc}") from exc
 
     @app.get("/api/overview")
     def overview(
