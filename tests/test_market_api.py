@@ -98,6 +98,8 @@ class MarketApiTests(unittest.TestCase):
     def test_all_europe_price_is_labeled_average_of_available_country_zones(self):
         payload = self.route("/api/overview")("ALL", date(2025, 1, 1), date(2025, 1, 1))
         self.assertEqual(payload["market"]["price_method"], "market_average")
+        self.assertEqual(payload["market"]["source_timezone"], "UTC")
+        self.assertEqual(payload["market"]["power_timezone"], "Europe/Berlin")
         self.assertEqual(len(payload["prices"]), 2)
         self.assertEqual(payload["prices"][0]["price_eur_per_mwh"], 40)
         self.assertEqual(payload["prices"][0]["market_count"], 1)

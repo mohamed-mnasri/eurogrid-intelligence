@@ -37,7 +37,7 @@ def create_app(database_path: Path | None = None) -> FastAPI:
 
     @app.get("/api/household-benchmark")
     def household_reference(geo: str = Query(min_length=2, max_length=16)) -> dict[str, Any]:
-        """Return Eurostat per-person use and tax-inclusive household-price references."""
+        """Return Eurostat's latest tax-inclusive household electricity price."""
         allowed = {"EU27_2020", "DE", "FR", "ES", "PL", "NL", "UK"}
         if geo not in allowed:
             raise HTTPException(status_code=404, detail="No Eurostat benchmark configured for this geography")

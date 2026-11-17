@@ -123,6 +123,9 @@ class MarketService:
         if bidding_zone not in markets:
             raise MarketDataError(f"No ingested data for market area {bidding_zone}")
         market = dict(markets[bidding_zone])
+        # Keep the provider power-series timezone distinct from the UTC clock
+        # used to align all-country day-ahead prices.
+        market["power_timezone"] = market.get("source_timezone") or "UTC"
         country = str(market["country_code"]).lower()
         aggregate = market["is_aggregate"]
         average_zone_rows = [row for row in markets.values()
