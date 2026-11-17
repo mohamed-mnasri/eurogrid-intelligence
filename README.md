@@ -52,4 +52,4 @@ These tests check the all-Europe generation selector, zone-scoped prices, licenc
 
 ## Next phase
 
-Stop after Phase 0. Once its exit criteria are met, Phase 1 will design reusable API clients and connector contracts from the actual response shapes and licence metadata.
+Stop after Phase 0. Next phase is in progress currently ...
