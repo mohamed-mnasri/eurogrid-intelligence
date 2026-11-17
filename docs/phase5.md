@@ -4,13 +4,15 @@ The React dashboard asks a local FastAPI service for records. The API reads test
 
 ## What the dashboard shows
 
-- The country/area selector lists only geographies that have been fetched into the local database. It begins with the Energy-Charts Europe aggregate, then the EU aggregate and named countries. Italy is not shown because the saved Italian series represents only northern Italy, not the country.
+- The country selector lists only geographies that have been fetched into the local database. It begins with All Europe, then named countries. The overlapping EU-only aggregate is hidden. Italy is not shown because the saved Italian series represents only northern Italy, not the country.
 - The month selector opens at the newest month available for the selected area. Previous/next buttons and the month input let you move through saved history.
 - Price charts appear only for bidding zones with saved prices. There is no single Europe-wide day-ahead price, and the configured Energy-Charts catalogue has no UK price series. Power data can still be shown for UK.
 - Prices, generation, demand, cross-border trading, and reference-location weather are shown when that source is available. Sub-hourly observations are averaged into UTC-hour buckets before comparisons.
 - Coverage and source lineage are available below the charts.
 
-The seeding script supports All Europe (`country=all`), European Union (`country=eu`), Germany, France, Spain, Poland, the Netherlands, and the United Kingdom. Prices are fetched only for available zones (DE-LU, FR, ES, PL, NL). Weather is one reference point per country, not a national average. These provider-supplied aggregates cannot be split into north/east/west regions after the fact; to calculate a regional roll-up we must ingest the relevant individual countries and define the grouping.
+The seeding script supports All Europe (`country=all`), Germany, France, Spain, Poland, the Netherlands, and the United Kingdom. Prices are fetched only for available zones (DE-LU, FR, ES, PL, NL). For All Europe, the dashboard computes a simple average of the available zone prices for each hour. It is an indicative comparison, not an official Europe-wide market price, and it weights each available market equally. Weather is one reference point per country, not a national average. The provider-supplied Europe power aggregate cannot be split into north/east/west regions after the fact; a regional roll-up requires country-by-country data and a defined grouping.
+
+The summary converts wholesale price to €/kWh for a familiar scale, while also showing its original €/MWh value. Power comparison charts use GW (1 GW = 1,000 MW). The generation chart starts with all reported sources combined beside public-grid load. Its selector lets you compare a single source with that load; the summary shows the selected source as a percentage of average load for matching hours. These are grid statistics, not household usage. Weather is a historical reference point; it does not calculate solar-panel output or battery coverage. That estimate needs solar-system, battery, location, and household-use assumptions.
 
 ## Public load and generation are not a full balance
 
@@ -56,6 +58,7 @@ Open the Vite address (usually `http://localhost:5173`). Stop each process with 
 ## Reading limits
 
 - MW is a rate of power at an instant; MWh is an amount of energy over time; €/MWh is wholesale price, not a household tariff.
+- The dashboard shows power comparisons in GW (1 GW = 1,000 MW) and also gives wholesale prices per kWh for a more familiar scale. The per-kWh number is not a household bill.
 - Generation is reported output, not installed capacity. Demand is provider-reported public-grid load. These alone do not describe a complete national electricity balance.
 - Price geography is a bidding zone; generation geography is the selected country or aggregate; weather is one coordinate. A same-hour association is context, not proof of cause.
 - The price baseline is the mean for the same UTC hour across currently saved valid observations. It is a visual reference, not a forecast.

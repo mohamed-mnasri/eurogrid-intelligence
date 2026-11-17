@@ -34,7 +34,6 @@ class Market:
 # back into country or regional values unless countries are fetched separately.
 MARKETS = (
     Market("All Europe", "all"),
-    Market("European Union", "eu"),
     Market("Germany", "de", "DE-LU", 52.52, 13.405, "Berlin"),
     Market("France", "fr", "FR", 48.8566, 2.3522, "Paris"),
     Market("Spain", "es", "ES", 40.4168, -3.7038, "Madrid"),

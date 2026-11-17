@@ -17,7 +17,6 @@ import duckdb
 MAX_QUERY_DAYS = 31
 COUNTRY_NAMES = {
     "all": "All Europe (aggregate)",
-    "eu": "European Union (aggregate)",
     "de": "Germany",
     "fr": "France",
     "es": "Spain",
@@ -25,7 +24,7 @@ COUNTRY_NAMES = {
     "nl": "Netherlands",
     "uk": "United Kingdom",
 }
-HIDDEN_COUNTRIES = {"it"}  # Stored IT-North data is a sub-country zone, not Italy-wide data.
+HIDDEN_COUNTRIES = {"it", "eu"}  # Italy is partial; the EU aggregate is not needed beside All Europe.
 
 
 class MarketDataError(Exception):
@@ -104,7 +103,9 @@ class MarketService:
                 "provider": (price and price.get("provider")) or "energy-charts",
                 "dataset": "day_ahead_price" if price else "public_power",
             })
-        return markets
+        # The country selector offers the pan-European aggregate and named
+        # countries. Do not present a second overlapping EU aggregate.
+        return [market for market in markets if market["country_code"] != "eu"]
 
     @staticmethod
     def _market_sort(code: str) -> tuple[int, str]:
@@ -121,16 +122,26 @@ class MarketService:
         markets = {row["bidding_zone"]: row for row in self.coverage()}
         if bidding_zone not in markets:
             raise MarketDataError(f"No ingested data for market area {bidding_zone}")
-        market = markets[bidding_zone]
+        market = dict(markets[bidding_zone])
         country = str(market["country_code"]).lower()
         aggregate = market["is_aggregate"]
+        average_zone_rows = [row for row in markets.values()
+                             if row["has_prices"] and row["country_code"] not in {"all", "eu"}]
+        if country == "all" and average_zone_rows:
+            market.update({"has_prices": True, "price_method": "market_average",
+                           "price_market_count": len(average_zone_rows), "source_timezone": "UTC"})
+        else:
+            market["price_method"] = "bidding_zone" if market["has_prices"] else "unavailable"
         begin_text, finish_text = start_date.isoformat(), end_date.isoformat()
 
         try:
             with self._connect() as db:
                 prices = []
                 if market["has_prices"]:
-                    prices = self._dict_rows(db, """SELECT CAST(price.interval_start_utc AS VARCHAR) AS interval_start_utc,
+                    if market["price_method"] == "market_average":
+                        prices = self._average_market_prices(db, average_zone_rows, begin_text, finish_text)
+                    else:
+                        prices = self._dict_rows(db, """SELECT CAST(price.interval_start_utc AS VARCHAR) AS interval_start_utc,
                         CAST(price.interval_end_utc AS VARCHAR) AS interval_end_utc,
                         price.original_timestamp, price.interval_minutes, price.price_eur_per_mwh,
                         price.data_status, baseline.mean_price_eur_per_mwh,
@@ -212,7 +223,9 @@ class MarketService:
                         "weather_rows": len(weather),"stale_observations": stale_count,
                         "flagged_power_weather_values": flagged_non_price},
             "lineage": {
-                "prices": "Energy-Charts day-ahead price by bidding zone; no single all-Europe price is published.",
+                "prices": (f"Equal-weight arithmetic average of valid day-ahead prices from {market['price_market_count']} available country bidding zones; this is an indicative comparison, not an official all-Europe clearing price."
+                           if market["price_method"] == "market_average" else
+                           "Energy-Charts day-ahead price by bidding zone; there is no single all-Europe price."),
                 "generation": "Energy-Charts public-power generation series; total power including industry is a separate dataset.",
                 "demand": "Energy-Charts public-power load series.",
                 "cross_border_flows": "Energy-Charts scheduled cross-border trading series; provider sign is preserved.",
@@ -221,6 +234,63 @@ class MarketService:
             },
             "source_trace": source_trace,
         }
+
+    @classmethod
+    def _average_market_prices(cls, db, markets: list[dict[str, Any]], start: str, end: str) -> list[dict[str, Any]]:
+        """Build one equal-weight hourly average from the displayed country zones."""
+        zones = [row["bidding_zone"] for row in markets]
+        if not zones:
+            return []
+        placeholders = ",".join("?" for _ in zones)
+        rows = cls._dict_rows(db, f"""SELECT price.bidding_zone,
+            CAST(price.interval_start_utc AS VARCHAR) AS interval_start_utc,
+            price.original_timestamp, price.price_eur_per_mwh, price.data_status,
+            baseline.mean_price_eur_per_mwh
+            FROM gold_market_price AS price
+            LEFT JOIN gold_price_hourly_baseline AS baseline
+              ON price.geography_id=baseline.geography_id
+             AND extract(hour from timezone('UTC',price.interval_start_utc))=baseline.utc_hour
+            WHERE price.bidding_zone IN ({placeholders})
+              AND CAST(timezone('UTC',price.interval_start_utc) AS DATE) BETWEEN ? AND ?
+            ORDER BY price.interval_start_utc""", [*zones, start, end])
+        per_zone_hour: dict[tuple[str, str], dict[str, list[float]]] = {}
+        for row in rows:
+            hour = cls._utc_hour(row["interval_start_utc"])
+            bucket = per_zone_hour.setdefault((str(row["bidding_zone"]), hour), {"price": [], "baseline": []})
+            value = row.get("price_eur_per_mwh")
+            if row.get("data_status") == "valid" and value is not None:
+                bucket["price"].append(float(value))
+            baseline = row.get("mean_price_eur_per_mwh")
+            if baseline is not None:
+                bucket["baseline"].append(float(baseline))
+
+        across_zones: dict[str, dict[str, list[float]]] = {}
+        for (_, hour), bucket in per_zone_hour.items():
+            summary = across_zones.setdefault(hour, {"price": [], "baseline": []})
+            for name in ("price", "baseline"):
+                if bucket[name]:
+                    summary[name].append(sum(bucket[name]) / len(bucket[name]))
+        result = []
+        for hour, summary in sorted(across_zones.items()):
+            if not summary["price"]:
+                continue
+            start_utc = datetime.fromisoformat(hour)
+            result.append({
+                "interval_start_utc": start_utc.isoformat(),
+                "interval_end_utc": (start_utc + timedelta(hours=1)).isoformat(),
+                "original_timestamp": start_utc.isoformat(),
+                "interval_minutes": 60,
+                "price_eur_per_mwh": sum(summary["price"]) / len(summary["price"]),
+                "mean_price_eur_per_mwh": (sum(summary["baseline"]) / len(summary["baseline"])
+                                            if summary["baseline"] else None),
+                "baseline_observation_count": None,
+                "data_status": "valid",
+                "provider": "energy-charts",
+                "dataset": "indicative_average_of_country_markets",
+                "raw_sha256": "",
+                "market_count": len(summary["price"]),
+            })
+        return result
 
     @staticmethod
     def _utc_hour(value: str) -> str:

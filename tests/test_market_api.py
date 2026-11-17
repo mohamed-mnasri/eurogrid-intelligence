@@ -93,6 +93,15 @@ class MarketApiTests(unittest.TestCase):
         self.assertEqual(by_name["United Kingdom"]["bidding_zone"], "UK")
         self.assertFalse(by_name["United Kingdom"]["has_prices"])
         self.assertNotIn("Italy", by_name)
+        self.assertNotIn("European Union (aggregate)", by_name)
+
+    def test_all_europe_price_is_labeled_average_of_available_country_zones(self):
+        payload = self.route("/api/overview")("ALL", date(2025, 1, 1), date(2025, 1, 1))
+        self.assertEqual(payload["market"]["price_method"], "market_average")
+        self.assertEqual(len(payload["prices"]), 2)
+        self.assertEqual(payload["prices"][0]["price_eur_per_mwh"], 40)
+        self.assertEqual(payload["prices"][0]["market_count"], 1)
+        self.assertIn("indicative comparison", payload["lineage"]["prices"])
 
     def test_api_rejects_unknown_zone_and_ranges_longer_than_31_days(self):
         with self.assertRaises(HTTPException) as unknown:
