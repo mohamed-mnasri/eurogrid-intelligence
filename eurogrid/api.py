@@ -46,7 +46,7 @@ def create_app(database_path: Path | None = None) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         except MarketDataError as exc:
-            status = 404 if str(exc).startswith("No ingested price coverage") else 503
+            status = 404 if str(exc).startswith(("No ingested price coverage", "No ingested data")) else 503
             raise HTTPException(status_code=status, detail=str(exc)) from exc
 
     return app

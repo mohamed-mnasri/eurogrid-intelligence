@@ -236,8 +236,13 @@ class Normalizer:
         """Upsert generation series, excluding non-generation measures."""
         payload = sample["payload"]
         geography = payload.get("country") or "all"
-        gid = self._geography("country" if geography != "all" else "europe_aggregate", geography,
-                              country=geography if geography != "all" else None, source=sample["provider"])
+        if geography == "all":
+            # Keep the aggregate's old key stable while making it selectable as
+            # an explicit geography in Gold/API coverage.
+            gid = self._geography("europe_aggregate", geography, source=sample["provider"])
+            self.db.execute("UPDATE dim_geography SET country_code='all' WHERE geography_id=?", [gid])
+        else:
+            gid = self._geography("country", geography, country=geography, source=sample["provider"])
         unit, zone, mins = self._source(sample)
         series = [s.get("id") for s in sample.get("metadata", {}).get("series", []) if s.get("id") not in NON_GENERATION]
         previous = None

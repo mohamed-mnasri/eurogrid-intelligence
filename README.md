@@ -70,7 +70,7 @@ The dbt sources, staging views, Gold marts, and quality checks are described in 
 
 ## Phase 5 market overview
 
-The React dashboard, FastAPI read endpoints, five-market sample, and startup steps are in the [Phase 5 guide](docs/phase5.md).
+The React dashboard, FastAPI read endpoints, Europe/country market sample, and startup steps are in the [Phase 5 guide](docs/phase5.md).
 
 ## Data and security rules
 
@@ -82,4 +82,4 @@ The React dashboard, FastAPI read endpoints, five-market sample, and startup ste
 
 ## Current limits
 
-The market overview is currently validated for DE-LU, FR, ES, IT-North, and NL over a bounded January 2025 sample. This is not complete pan-European data coverage. Generation/load and net trading availability varies by country and provider series. ENTSO-E still requires a separately requested user token and is not included. The database and sample responses remain local; review source terms before redistributing them.
+The market overview can show Energy-Charts' Europe and EU aggregates plus fetched country series for Germany, France, Spain, Poland, the Netherlands, and the UK. Day-ahead prices remain bidding-zone-specific; this provider has no single Europe-wide price or UK price in the configured catalogue. The saved database determines which months are selectable. Public generation and load do not form a complete system balance. ENTSO-E still requires a separately requested user token and is not included. The database and source responses remain local; review source terms before redistributing them.

@@ -23,6 +23,7 @@ class MarketApiTests(unittest.TestCase):
             price_interval_count INTEGER,valid_price_interval_count INTEGER,
             flagged_price_interval_count INTEGER,provider VARCHAR,dataset VARCHAR)""")
         db.execute("INSERT INTO gold_market_coverage VALUES ('fr','FR','2025-01-01 00:00:00+00','2025-01-01 02:00:00+00','2025-01-01','2025-01-31','Europe/Paris',3,3,0,'energy-charts','day_ahead_price')")
+        db.execute("INSERT INTO gold_market_coverage VALUES ('de','DE-LU','2025-01-01 00:00:00+00','2025-01-01 02:00:00+00','2025-01-01','2025-01-31','Europe/Berlin',3,3,0,'energy-charts','day_ahead_price')")
         db.execute("""CREATE TABLE gold_market_price (
             interval_start_utc TIMESTAMPTZ,interval_end_utc TIMESTAMPTZ,original_timestamp VARCHAR,
             interval_minutes INTEGER,price_eur_per_mwh DOUBLE,data_status VARCHAR,
@@ -35,13 +36,19 @@ class MarketApiTests(unittest.TestCase):
             ('2025-01-01 01:00:00+00','2025-01-01 02:00:00+00','2025-01-01T02:00:00+01:00',60,44,'valid','energy-charts','day_ahead_price','hash2','FR','price-geo'),
             ('2025-01-01 02:00:00+00','2025-01-01 03:00:00+00','2025-01-01T03:00:00+01:00',60,NULL,'missing','energy-charts','day_ahead_price','hash3','FR','price-geo')""")
         db.execute("""CREATE TABLE gold_generation_mix (
-            interval_start_utc TIMESTAMPTZ,original_timestamp VARCHAR,production_type VARCHAR,
-            generation_mw DOUBLE,data_status VARCHAR,provider VARCHAR,dataset VARCHAR,raw_sha256 VARCHAR,country_code VARCHAR)""")
-        db.execute("INSERT INTO gold_generation_mix VALUES ('2025-01-01 00:00:00+00','2025-01-01T01:00:00+01:00','solar',100,'valid','energy-charts','public_power','hash4','fr')")
+            interval_start_utc TIMESTAMPTZ,original_timestamp VARCHAR,source_timezone VARCHAR,production_type VARCHAR,
+            generation_mw DOUBLE,data_status VARCHAR,provider VARCHAR,dataset VARCHAR,raw_sha256 VARCHAR,country_code VARCHAR,geography_code VARCHAR)""")
+        db.execute("""INSERT INTO gold_generation_mix VALUES
+            ('2025-01-01 00:00:00+00','2025-01-01T01:00:00+01:00','Europe/Paris','solar',100,'valid','energy-charts','public_power','hash4','fr','fr'),
+            ('2025-01-01 00:00:00+00','2025-01-01T01:00:00+01:00','Europe/Berlin','wind_onshore',200,'valid','energy-charts','public_power','hash8','all','all'),
+            ('2025-01-01 00:00:00+00','2025-01-01T01:00:00+01:00','Europe/Berlin','wind_onshore',80,'valid','energy-charts','public_power','hash9','eu','eu'),
+            ('2025-01-01 00:00:00+00','2025-01-01T01:00:00+01:00','Europe/London','wind_onshore',90,'valid','energy-charts','public_power','hash10','uk','uk')""")
         db.execute("""CREATE TABLE gold_demand (
             interval_start_utc TIMESTAMPTZ,original_timestamp VARCHAR,demand_mw DOUBLE,
-            data_status VARCHAR,provider VARCHAR,dataset VARCHAR,raw_sha256 VARCHAR,country_code VARCHAR)""")
-        db.execute("INSERT INTO gold_demand VALUES ('2025-01-01 00:00:00+00','2025-01-01T01:00:00+01:00',500,'valid','energy-charts','public_power','hash5','fr')")
+            data_status VARCHAR,provider VARCHAR,dataset VARCHAR,raw_sha256 VARCHAR,country_code VARCHAR,geography_code VARCHAR)""")
+        db.execute("""INSERT INTO gold_demand VALUES
+            ('2025-01-01 00:00:00+00','2025-01-01T01:00:00+01:00',500,'valid','energy-charts','public_power','hash5','fr','fr'),
+            ('2025-01-01 00:00:00+00','2025-01-01T01:00:00+01:00',1000,'valid','energy-charts','public_power','hash11','all','all')""")
         db.execute("""CREATE TABLE gold_cross_border_flow (
             interval_start_utc TIMESTAMPTZ,original_timestamp VARCHAR,net_cross_border_trading_mw DOUBLE,
             data_status VARCHAR,provider VARCHAR,dataset VARCHAR,raw_sha256 VARCHAR,country_code VARCHAR)""")
@@ -64,7 +71,7 @@ class MarketApiTests(unittest.TestCase):
 
     def test_coverage_and_overview_return_gold_model_records_and_gaps(self):
         coverage = self.route("/api/coverage")()
-        self.assertEqual(coverage["markets"][0]["bidding_zone"], "FR")
+        self.assertEqual(next(item for item in coverage["markets"] if item["market_name"] == "France")["bidding_zone"], "FR")
         payload = self.route("/api/overview")("FR", date(2025, 1, 1), date(2025, 1, 1))
         self.assertEqual(len(payload["prices"]), 3)
         self.assertEqual(len(payload["generation"]), 1)
@@ -76,7 +83,16 @@ class MarketApiTests(unittest.TestCase):
                          {"2024-12-31T23:00:00Z", "2025-01-01T00:00:00Z"})
         self.assertEqual(payload["quality"]["flagged_price_values"], 1)
         self.assertEqual(payload["quality"]["unobserved_hour_slots_estimate"], 21)
-        self.assertIn("gold_market_price", payload["lineage"]["prices"])
+        self.assertIn("day-ahead price", payload["lineage"]["prices"])
+
+    def test_coverage_includes_named_europe_aggregates_and_power_only_countries(self):
+        markets = self.route("/api/coverage")()["markets"]
+        by_name = {item["market_name"]: item for item in markets}
+        self.assertEqual(markets[0]["market_name"], "All Europe (aggregate)")
+        self.assertFalse(by_name["All Europe (aggregate)"]["has_prices"])
+        self.assertEqual(by_name["United Kingdom"]["bidding_zone"], "UK")
+        self.assertFalse(by_name["United Kingdom"]["has_prices"])
+        self.assertNotIn("Italy", by_name)
 
     def test_api_rejects_unknown_zone_and_ranges_longer_than_31_days(self):
         with self.assertRaises(HTTPException) as unknown:
