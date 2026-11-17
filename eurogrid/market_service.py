@@ -98,8 +98,8 @@ class MarketService:
                 weather = self._dict_rows(db, """SELECT CAST(interval_start_utc AS VARCHAR) AS interval_start_utc, original_timestamp,
                     variable, weather_value, weather_unit, data_status, provider, dataset, raw_sha256
                     FROM gold_weather WHERE lower(country_code)=?
-                    AND CAST(substr(original_timestamp,1,10) AS DATE) BETWEEN ? AND ?
-                    ORDER BY interval_start_utc,variable""", [country, begin_text, finish_text])
+                    AND CAST(timezone(?, interval_start_utc) AS DATE) BETWEEN ? AND ?
+                    ORDER BY interval_start_utc,variable""", [country, market.get("source_timezone") or "UTC", begin_text, finish_text])
         except duckdb.Error as exc:
             raise MarketDataError(f"Gold models are missing or failed to query; run dbt first. Details: {exc}") from exc
 

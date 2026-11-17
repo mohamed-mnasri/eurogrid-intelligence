@@ -2,13 +2,13 @@ import { useEffect, useMemo, useState } from 'react'
 import ReactEChartsCore from 'echarts-for-react/esm/core'
 import * as echarts from 'echarts/core'
 import { LineChart } from 'echarts/charts'
-import { DataZoomComponent, GridComponent, LegendScrollComponent, MarkLineComponent, TitleComponent, TooltipComponent } from 'echarts/components'
+import { DataZoomComponent, GridComponent, LegendScrollComponent, MarkLineComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import type { EChartsOption } from 'echarts'
 import './styles.css'
 
-// Register only the chart types and features used on this page to keep its JS bundle smaller.
-echarts.use([LineChart, DataZoomComponent, GridComponent, LegendScrollComponent, MarkLineComponent, TitleComponent, TooltipComponent, CanvasRenderer])
+// Register only the ECharts features used here to keep the local dashboard lean.
+echarts.use([LineChart, DataZoomComponent, GridComponent, LegendScrollComponent, MarkLineComponent, TooltipComponent, CanvasRenderer])
 
 const API = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000'
 
@@ -26,6 +26,15 @@ type Market = {
 }
 
 type Point = Record<string, string | number | null>
+type HourRow = {
+  key: string
+  time: string
+  price: number | null
+  demand: number | null
+  generation: number | null
+  renewableShare: number | null
+  weather: number | null
+}
 type Overview = {
   market: Market
   window: { start_date: string; end_date: string; expected_hourly_intervals: number }
@@ -39,6 +48,17 @@ type Overview = {
   source_trace: { measure: string; model: string; provider: string; dataset: string; raw_sha256: string; record_count: number }[]
 }
 
+const weatherLabels: Record<string, string> = {
+  temperature: 'Air temperature',
+  wind_speed: 'Wind speed',
+  shortwave_radiation: 'Sunlight reaching the ground',
+}
+const weatherDescriptions: Record<string, string> = {
+  temperature: 'Air temperature at this reference location.',
+  wind_speed: 'Wind speed at this reference location; metres per second (m/s).',
+  shortwave_radiation: 'Sunlight energy arriving at each square metre; watts per square metre (W/m²).',
+}
+
 async function getJson<T>(url: string): Promise<T> {
   const response = await fetch(url)
   if (!response.ok) {
@@ -46,6 +66,10 @@ async function getJson<T>(url: string): Promise<T> {
     throw new Error(payload.detail ?? `Request failed (${response.status})`)
   }
   return response.json() as Promise<T>
+}
+
+function numeric(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
 function formatNumber(value: number | null | undefined, digits = 1) {
@@ -57,16 +81,20 @@ function localLabel(row: Point) {
   return original.replace('T', ' ').slice(0, 16)
 }
 
-function chartBase(title: string, unit: string, labels: string[]): EChartsOption {
+function axisLabel(row: Point, singleDay: boolean) {
+  const original = String(row.original_timestamp ?? '')
+  return singleDay ? original.slice(11, 16) : original.replace('T', ' ').slice(0, 16)
+}
+
+function chartBase(unit: string, labels: string[]): EChartsOption {
   return {
     animation: false,
-    grid: { left: 58, right: 24, top: 38, bottom: 56 },
-    tooltip: { trigger: 'axis', backgroundColor: '#0d1918', borderColor: '#314542', textStyle: { color: '#eff5ef' } },
-    legend: { top: 0, right: 8, textStyle: { color: '#91a39c' }, itemWidth: 14, itemHeight: 3 },
-    xAxis: { type: 'category', data: labels, boundaryGap: false, axisLabel: { color: '#71837d', hideOverlap: true }, axisLine: { lineStyle: { color: '#273c38' } }, axisTick: { show: false } },
-    yAxis: { type: 'value', name: unit, nameTextStyle: { color: '#71837d' }, axisLabel: { color: '#71837d' }, splitLine: { lineStyle: { color: '#1c2b29' } } },
-    title: { text: title, left: 8, top: 2, textStyle: { color: '#eaf1e8', fontSize: 13, fontWeight: 500 } },
-    dataZoom: [{ type: 'inside' }, { type: 'slider', height: 16, bottom: 5, borderColor: '#273c38', fillerColor: 'rgba(103, 202, 143, .13)', textStyle: { color: '#71837d' } }],
+    grid: { left: 64, right: 22, top: 42, bottom: 58, containLabel: true },
+    tooltip: { trigger: 'axis', confine: true, backgroundColor: '#0d1918', borderColor: '#49625a', textStyle: { color: '#eff5ef' } },
+    legend: { top: 2, right: 8, textStyle: { color: '#bdc9c2' }, itemWidth: 14, itemHeight: 3, pageTextStyle: { color: '#bdc9c2' } },
+    xAxis: { type: 'category', data: labels, boundaryGap: false, axisLabel: { color: '#aab9b1', hideOverlap: true, margin: 12 }, axisLine: { lineStyle: { color: '#42554e' } }, axisTick: { show: false } },
+    yAxis: { type: 'value', name: unit, nameTextStyle: { color: '#aab9b1', padding: [0, 0, 0, 8] }, axisLabel: { color: '#aab9b1' }, splitLine: { lineStyle: { color: '#293a35' } } },
+    dataZoom: [{ type: 'inside' }, { type: 'slider', height: 14, bottom: 5, borderColor: '#344a42', fillerColor: 'rgba(103, 202, 143, .16)', textStyle: { color: '#aab9b1' } }],
   }
 }
 
@@ -78,7 +106,7 @@ export default function App() {
   const [data, setData] = useState<Overview | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [weatherVariable, setWeatherVariable] = useState('temperature_2m')
+  const [weatherVariable, setWeatherVariable] = useState('temperature')
 
   useEffect(() => {
     getJson<{ markets: Market[] }>(`${API}/api/coverage`)
@@ -87,7 +115,8 @@ export default function App() {
         const first = available.find((item) => item.bidding_zone === 'DE-LU') ?? available[0]
         if (first) {
           setZone(first.bidding_zone)
-          setStart(first.first_source_date)
+          // Start with one day so the first chart reads like an hourly day view.
+          setStart(first.last_source_date)
           setEnd(first.last_source_date)
         }
       })
@@ -107,15 +136,69 @@ export default function App() {
   }, [zone, start, end])
 
   const selectedMarket = markets.find((market) => market.bidding_zone === zone)
-  const priceLabels = useMemo(() => data?.prices.map(localLabel) ?? [], [data])
+  const singleDay = start === end
+  const dateRangeLabel = singleDay ? start : `${start} to ${end}`
+  const priceLabels = useMemo(() => data?.prices.map((row) => axisLabel(row, singleDay)) ?? [], [data, singleDay])
+
+  const hourlyRows = useMemo<HourRow[]>(() => {
+    if (!data) return []
+    const generationByTime = new Map<string, { total: number; renewables: number }>()
+    const demandByTime = new Map<string, number>()
+    const weatherByTime = new Map<string, number>()
+    const renewableTypes = new Set(['wind_onshore', 'wind_offshore', 'solar', 'hydro_run_of_river', 'hydro_water_reservoir', 'biomass', 'geothermal', 'other_renewables'])
+
+    for (const row of data.generation) {
+      const value = numeric(row.generation_mw)
+      if (row.data_status !== 'valid' || value == null) continue
+      const key = String(row.interval_start_utc)
+      const bucket = generationByTime.get(key) ?? { total: 0, renewables: 0 }
+      bucket.total += value
+      if (renewableTypes.has(String(row.production_type))) bucket.renewables += value
+      generationByTime.set(key, bucket)
+    }
+    for (const row of data.demand) {
+      const value = numeric(row.demand_mw)
+      if (row.data_status === 'valid' && value != null) demandByTime.set(String(row.interval_start_utc), value)
+    }
+    for (const row of data.weather) {
+      const value = numeric(row.weather_value)
+      if (row.variable === weatherVariable && row.data_status === 'valid' && value != null) weatherByTime.set(String(row.interval_start_utc), value)
+    }
+
+    return data.prices.map((price) => {
+      const key = String(price.interval_start_utc)
+      const generation = generationByTime.get(key)
+      return {
+        key,
+        time: localLabel(price),
+        price: numeric(price.price_eur_per_mwh),
+        demand: demandByTime.get(key) ?? null,
+        generation: generation?.total ?? null,
+        renewableShare: generation && generation.total > 0 ? generation.renewables / generation.total * 100 : null,
+        weather: weatherByTime.get(key) ?? null,
+      }
+    })
+  }, [data, weatherVariable])
+
+  const comparisonRows = hourlyRows.filter((row) => row.demand != null && row.generation != null)
+  const averageDemand = comparisonRows.length ? comparisonRows.reduce((sum, row) => sum + row.demand!, 0) / comparisonRows.length : null
+  const averageGeneration = comparisonRows.length ? comparisonRows.reduce((sum, row) => sum + row.generation!, 0) / comparisonRows.length : null
+  const demandShare = averageDemand != null && averageGeneration != null && averageGeneration > 0
+    ? averageDemand / averageGeneration * 100
+    : null
+  const renewableRows = hourlyRows.filter((row) => row.renewableShare != null)
+  const averageRenewableShare = renewableRows.length
+    ? renewableRows.reduce((sum, row) => sum + row.renewableShare!, 0) / renewableRows.length
+    : null
+
   const priceOption = useMemo(() => {
     if (!data) return {}
-    const option = chartBase('Day-ahead price and hourly baseline', 'EUR / MWh', priceLabels)
+    const option = chartBase('€/MWh', priceLabels)
     return {
       ...option,
       series: [
-        { name: 'Observed price', type: 'line', data: data.prices.map((row) => row.price_eur_per_mwh), showSymbol: false, connectNulls: false, lineStyle: { color: '#6ee0a5', width: 2 }, itemStyle: { color: '#6ee0a5' } },
-        { name: 'Stored-history hour mean', type: 'line', data: data.prices.map((row) => row.mean_price_eur_per_mwh), showSymbol: false, connectNulls: true, lineStyle: { color: '#f2b66d', width: 1.5, type: 'dashed' }, itemStyle: { color: '#f2b66d' } },
+        { name: 'Hourly wholesale price', type: 'line', data: data.prices.map((row) => row.price_eur_per_mwh), showSymbol: true, symbolSize: 5, connectNulls: false, lineStyle: { color: '#6ee0a5', width: 2 }, itemStyle: { color: '#6ee0a5' } },
+        { name: 'Usual price at this hour', type: 'line', data: data.prices.map((row) => row.mean_price_eur_per_mwh), showSymbol: false, connectNulls: true, lineStyle: { color: '#f2b66d', width: 1.5, type: 'dashed' }, itemStyle: { color: '#f2b66d' } },
       ],
     } satisfies EChartsOption
   }, [data, priceLabels])
@@ -124,13 +207,15 @@ export default function App() {
     if (!data) return {}
     const times = [...new Set(data.generation.map((row) => String(row.interval_start_utc)))].sort()
     const seriesNames = [...new Set(data.generation.map((row) => String(row.production_type)))].sort()
+    const displayNames = seriesNames.map((name) => name.replaceAll('_', ' '))
     const byTypeTime = new Map(data.generation.map((row) => [`${row.production_type}|${row.interval_start_utc}`, row.generation_mw]))
-    const option = chartBase('Generation by source', 'MW', times.map((value) => value.slice(11, 16)))
+    const labelsByTime = new Map(data.generation.map((row) => [String(row.interval_start_utc), axisLabel(row, singleDay)]))
+    const option = chartBase('MW (power produced)', times.map((time) => labelsByTime.get(time) ?? time))
     return {
       ...option,
-      legend: { ...(option.legend as object), data: seriesNames, type: 'scroll', left: 68, right: 18 },
+      legend: { ...(option.legend as object), data: displayNames, type: 'scroll', left: 8, right: 8 },
       series: seriesNames.map((name) => ({
-        name,
+        name: name.replaceAll('_', ' '),
         type: 'line',
         stack: 'generation',
         areaStyle: { opacity: 0.18 },
@@ -139,127 +224,122 @@ export default function App() {
         data: times.map((time) => byTypeTime.get(`${name}|${time}`) ?? null),
       })),
     } satisfies EChartsOption
-  }, [data])
+  }, [data, singleDay])
+
+  const renewableOption = useMemo(() => {
+    const option = chartBase('% of recorded generation', hourlyRows.map((row) => row.time.slice(11, 16)))
+    return {
+      ...option,
+      yAxis: { ...(option.yAxis as object), min: 0, max: 100 },
+      series: [{ name: 'Renewable share', type: 'line', data: hourlyRows.map((row) => row.renewableShare), showSymbol: false, connectNulls: false, lineStyle: { color: '#e3c56e', width: 2 }, areaStyle: { color: 'rgba(227, 197, 110, .10)' } }],
+    } satisfies EChartsOption
+  }, [hourlyRows])
 
   const demandOption = useMemo(() => {
-    if (!data) return {}
-    const labels = data.demand.map(localLabel)
-    const option = chartBase('Demand (provider load series)', 'MW', labels)
-    return { ...option, series: [{ name: 'Demand', type: 'line', data: data.demand.map((row) => row.demand_mw), showSymbol: false, connectNulls: false, lineStyle: { color: '#87adff', width: 2 }, areaStyle: { color: 'rgba(92, 134, 228, .10)' } }] } satisfies EChartsOption
-  }, [data])
+    const option = chartBase('MW (power needed)', hourlyRows.map((row) => row.time.slice(11, 16)))
+    return { ...option, series: [{ name: 'Reported demand', type: 'line', data: hourlyRows.map((row) => row.demand), showSymbol: true, symbolSize: 4, connectNulls: false, lineStyle: { color: '#87adff', width: 2 }, areaStyle: { color: 'rgba(92, 134, 228, .10)' } }] } satisfies EChartsOption
+  }, [hourlyRows])
 
   const flowOption = useMemo(() => {
-    if (!data) return {}
-    const labels = data.cross_border_flows.map(localLabel)
-    const option = chartBase('Net scheduled cross-border trading', 'MW · provider sign', labels)
-    return { ...option, series: [{ name: 'Net trading', type: 'line', data: data.cross_border_flows.map((row) => row.net_cross_border_trading_mw), showSymbol: false, connectNulls: false, lineStyle: { color: '#c68cff', width: 2 }, areaStyle: { color: 'rgba(198, 140, 255, .10)' }, markLine: { silent: true, symbol: 'none', data: [{ yAxis: 0 }], lineStyle: { color: '#63716d', type: 'dashed' } } }] } satisfies EChartsOption
-  }, [data])
+    const option = chartBase('MW (scheduled power flow)', data?.cross_border_flows.map((row) => axisLabel(row, singleDay)) ?? [])
+    return { ...option, series: [{ name: 'Net cross-border flow', type: 'line', data: data?.cross_border_flows.map((row) => row.net_cross_border_trading_mw) ?? [], showSymbol: false, connectNulls: false, lineStyle: { color: '#c68cff', width: 2 }, areaStyle: { color: 'rgba(198, 140, 255, .10)' }, markLine: { silent: true, symbol: 'none', data: [{ yAxis: 0 }], lineStyle: { color: '#879790', type: 'dashed' } } }] } satisfies EChartsOption
+  }, [data, singleDay])
 
-  const weatherRows = useMemo(() => data?.weather.filter((row) => row.variable === weatherVariable) ?? [], [data, weatherVariable])
-  const weatherLabel = weatherVariable === 'temperature_2m' ? 'Temperature' : weatherVariable === 'wind_speed_10m' ? 'Wind speed' : 'Shortwave radiation'
-  const weatherUnit = weatherRows[0]?.weather_unit ?? ''
+  const weatherRows = useMemo(() => data?.weather.filter((row) => row.variable === weatherVariable && row.data_status === 'valid') ?? [], [data, weatherVariable])
+  const weatherUnit = String(weatherRows[0]?.weather_unit ?? '')
   const weatherOption = useMemo(() => {
-    const labels = weatherRows.map(localLabel)
-    const option = chartBase(`${weatherLabel} · coordinate reference`, String(weatherUnit), labels)
-    return { ...option, series: [{ name: weatherLabel, type: 'line', data: weatherRows.map((row) => row.weather_value), showSymbol: false, connectNulls: false, lineStyle: { color: '#4ccbd2', width: 2 } }] } satisfies EChartsOption
-  }, [weatherRows, weatherLabel, weatherUnit])
+    const localTimeByInterval = new Map(hourlyRows.map((row) => [row.key, row.time]))
+    const labels = weatherRows.map((row) => {
+      const localTime = localTimeByInterval.get(String(row.interval_start_utc)) ?? axisLabel(row, singleDay)
+      return singleDay ? localTime.slice(11, 16) : localTime
+    })
+    const option = chartBase(weatherUnit || 'weather reading', labels)
+    return { ...option, series: [{ name: weatherLabels[weatherVariable], type: 'line', data: weatherRows.map((row) => row.weather_value), showSymbol: true, symbolSize: 4, connectNulls: false, lineStyle: { color: '#4ccbd2', width: 2 } }] } satisfies EChartsOption
+  }, [hourlyRows, weatherRows, weatherUnit, weatherVariable, singleDay])
 
-  const renewableProfile = useMemo(() => {
-    if (!data) return []
-    const renewableTypes = new Set(['wind_onshore', 'wind_offshore', 'solar', 'hydro_run_of_river', 'hydro_water_reservoir', 'biomass', 'geothermal', 'other_renewables'])
-    const hourly = new Map<string, { renewable: number; total: number }>()
-    for (const row of data.generation) {
-      if (row.data_status !== 'valid' || typeof row.generation_mw !== 'number') continue
-      const key = String(row.interval_start_utc)
-      const bucket = hourly.get(key) ?? { renewable: 0, total: 0 }
-      bucket.total += row.generation_mw
-      if (renewableTypes.has(String(row.production_type))) bucket.renewable += row.generation_mw
-      hourly.set(key, bucket)
+  const lastPrice = hourlyRows.at(-1)?.price ?? null
+  const highestPrice = hourlyRows.reduce<number | null>((max, row) => row.price == null ? max : max == null ? row.price : Math.max(max, row.price), null)
+  const lowestPrice = hourlyRows.reduce<number | null>((min, row) => row.price == null ? min : min == null ? row.price : Math.min(min, row.price), null)
+
+  function changeMarket(nextZone: string) {
+    const nextMarket = markets.find((market) => market.bidding_zone === nextZone)
+    setZone(nextZone)
+    if (nextMarket) {
+      setStart(nextMarket.last_source_date)
+      setEnd(nextMarket.last_source_date)
     }
-    return [...hourly.entries()].sort(([left], [right]) => left.localeCompare(right))
-      .filter(([, item]) => item.total > 0)
-      .map(([timestamp, item]) => ({ timestamp, percent: 100 * item.renewable / item.total }))
-  }, [data])
-  const renewableShare = renewableProfile.length
-    ? renewableProfile.reduce((sum, item) => sum + item.percent, 0) / renewableProfile.length
-    : null
-  const renewableOption = useMemo(() => {
-    const labels = renewableProfile.map((item) => item.timestamp.slice(11, 16))
-    const option = chartBase('Renewable share of reported generation', '%', labels)
-    return { ...option, yAxis: { ...(option.yAxis as object), min: 0, max: 100 }, series: [{ name: 'Renewable share', type: 'line', data: renewableProfile.map((item) => item.percent), showSymbol: false, connectNulls: false, lineStyle: { color: '#e3c56e', width: 2 }, areaStyle: { color: 'rgba(227, 197, 110, .10)' } }] } satisfies EChartsOption
-  }, [renewableProfile])
-
-  const latestPrice = data?.prices.at(-1)?.price_eur_per_mwh as number | null | undefined
-  const avgDemand = data?.demand.length ? data.demand.reduce((sum, row) => sum + (Number(row.demand_mw) || 0), 0) / data.demand.length : null
-  const priceRows = data?.prices ?? []
-  const inDateOrder = priceRows.filter((row) => row.data_status === 'valid' && typeof row.price_eur_per_mwh === 'number')
-  const highestPrice = inDateOrder.length ? Math.max(...inDateOrder.map((row) => Number(row.price_eur_per_mwh))) : null
-  const lowestPrice = inDateOrder.length ? Math.min(...inDateOrder.map((row) => Number(row.price_eur_per_mwh))) : null
+  }
 
   return (
     <main className="app-shell">
-      <aside className="rail">
-        <div className="brand-mark">E<span>G</span></div>
-        <div className="rail-divider" />
+      <aside className="rail" aria-label="EuroGrid navigation">
+        <div className="brand-mark">E<span>G</span></div><div className="rail-divider" />
         <button className="rail-item active" aria-label="Market overview"><span>⌁</span></button>
-        <button className="rail-item" aria-label="Market analytics"><span>▥</span></button>
-        <button className="rail-item" aria-label="Data operations"><span>◷</span></button>
-        <div className="rail-spacer" />
-        <div className="rail-status"><i />LOCAL</div>
+        <div className="rail-spacer" /><div className="rail-status"><i />LOCAL</div>
       </aside>
 
       <section className="workspace">
-        <header className="topbar">
-          <div className="breadcrumb"><span>EUROGRID</span><b>/</b><strong>Market intelligence</strong></div>
-          <div className="topbar-right"><span className="live-dot" /> Local data workspace <span className="avatar">M</span></div>
-        </header>
-
+        <header className="topbar"><div className="breadcrumb"><span>EUROGRID</span><b>/</b><strong>Electricity at a glance</strong></div><div className="topbar-right"><span className="live-dot" /> Sample data · local only <span className="avatar">M</span></div></header>
         <div className="page-content">
           <div className="title-row">
-            <div>
-              <div className="eyebrow">EUROPEAN POWER SYSTEMS <span>·</span> MARKET OVERVIEW</div>
-              <h1>Market overview</h1>
-              <p className="subtitle">A source-traceable view of prices, power mix and system signals.</p>
-            </div>
-            <div className="sample-badge"><span className="badge-icon">◈</span><div><b>Research sample</b><small>Public data · local only</small></div></div>
+            <div><div className="eyebrow">EUROPEAN POWER SYSTEMS <span>·</span> BEGINNER VIEW</div><h1>Electricity at a glance</h1><p className="subtitle">Choose a country and day to see hourly prices, electricity produced, demand, and local weather.</p></div>
+            <div className="sample-badge"><span className="badge-icon">◈</span><div><b>Research sample</b><small>January 2025 · public data</small></div></div>
           </div>
 
           <section className="filter-panel" aria-label="Market and date filters">
-            <label className="filter-control market-control"><span>MARKET ZONE</span><select value={zone} onChange={(event) => setZone(event.target.value)} disabled={!markets.length}>
+            <label className="filter-control market-control"><span>COUNTRY / MARKET AREA</span><select value={zone} onChange={(event) => changeMarket(event.target.value)} disabled={!markets.length}>
               {markets.map((market) => <option value={market.bidding_zone} key={market.bidding_zone}>{market.country_code?.toUpperCase()} · {market.bidding_zone}</option>)}
-            </select></label>
+            </select><small>Choose the area with available price data.</small></label>
             <div className="filter-divider" />
-            <label className="filter-control"><span>FROM</span><input type="date" value={start} onChange={(event) => setStart(event.target.value)} /></label>
-            <span className="date-arrow">→</span>
-            <label className="filter-control"><span>TO</span><input type="date" value={end} onChange={(event) => setEnd(event.target.value)} /></label>
+            <label className="filter-control"><span>FROM (LOCAL DATE)</span><input type="date" value={start} onChange={(event) => setStart(event.target.value)} /><small>Same date = hourly view.</small></label>
+            <span className="date-arrow" aria-hidden="true">→</span>
+            <label className="filter-control"><span>TO (LOCAL DATE)</span><input type="date" value={end} onChange={(event) => setEnd(event.target.value)} /><small>Up to 31 days.</small></label>
             <div className="filter-spacer" />
-            <div className="coverage-chip"><i />{selectedMarket ? `${selectedMarket.valid_price_interval_count.toLocaleString()} price intervals` : 'Loading coverage'}</div>
+            <div className="coverage-chip"><i />{selectedMarket ? `${selectedMarket.valid_price_interval_count.toLocaleString()} hourly price records available` : 'Loading market list'}</div>
           </section>
 
-          {error && <div className="notice error-notice"><b>Couldn’t load this view.</b> {error}<span> Confirm the API is running and that you selected dates with source coverage.</span></div>}
-          {loading && <div className="loading-line"><i /> Querying tested Gold models…</div>}
+          <details className="quick-guide" open>
+            <summary>New to electricity data? Start here</summary>
+            <div className="guide-grid">
+              <p><b>MW measures power.</b> Think of it as how fast electricity is being produced or needed at a given hour.</p>
+              <p><b>MWh measures energy.</b> 1 MW sustained for 1 hour equals 1 MWh. The price is wholesale euros per MWh, not a household bill.</p>
+              <p><b>Demand vs generation.</b> Generation is reported production, not the maximum power plants could make. Trade, storage, and missing data can explain differences.</p>
+            </div>
+          </details>
+
+          {error && <div className="notice error-notice"><b>Couldn’t load this view.</b> {error}<span> Check that the API is running and the selected dates have data.</span></div>}
+          {loading && <div className="loading-line"><i />Loading hourly electricity data…</div>}
           {!loading && !error && data && <>
-            <section className="metric-grid">
-              <article className="metric-card"><div className="metric-label">LATEST DAY-AHEAD</div><div className="metric-value">{formatNumber(latestPrice)} <small>€/MWh</small></div><div className="metric-foot">Last observed interval in range</div></article>
-              <article className="metric-card"><div className="metric-label">RANGE HIGH / LOW</div><div className="metric-value compact">{formatNumber(highestPrice)} <small className="muted">/</small> {formatNumber(lowestPrice)}</div><div className="metric-foot">Valid price observations · €/MWh</div></article>
-              <article className="metric-card"><div className="metric-label">AVERAGE DEMAND</div><div className="metric-value">{formatNumber(avgDemand, 0)} <small>MW</small></div><div className="metric-foot">Provider load series for {data.market.country_code?.toUpperCase() || 'selected area'}</div></article>
-              <article className="metric-card"><div className="metric-label">MEAN RENEWABLE SHARE</div><div className="metric-value">{renewableShare == null ? '—' : formatNumber(renewableShare)} <small>%</small></div><div className="metric-foot">Calculated from available valid generation rows</div></article>
+            <div className="section-intro"><div><h2>Selected period: {dateRangeLabel}</h2><p>Times shown in the source’s local timezone{data.market.source_timezone ? ` (${data.market.source_timezone})` : ''}.</p></div><span>{hourlyRows.length} price hours in this view</span></div>
+
+            <section className="metric-grid" aria-label="Key numbers for selected period">
+              <article className="metric-card"><div className="metric-label">LAST HOURLY WHOLESALE PRICE</div><div className="metric-value">{lastPrice == null ? '—' : `€${formatNumber(lastPrice)}`}<small> / MWh</small></div><div className="metric-foot">At {hourlyRows.at(-1)?.time ?? '—'} · price to buy 1 MWh in this market.</div></article>
+              <article className="metric-card"><div className="metric-label">HIGHEST / LOWEST PRICE</div><div className="metric-value compact">{highestPrice == null ? '—' : `€${formatNumber(highestPrice)}`} <small className="muted">/</small> {lowestPrice == null ? '—' : `€${formatNumber(lowestPrice)}`}<small> / MWh</small></div><div className="metric-foot">Highest and lowest hourly wholesale price in this period.</div></article>
+              <article className="metric-card"><div className="metric-label">POWER NEEDED VS PRODUCED · AVERAGE</div><div className="metric-value">{formatNumber(averageDemand, 0)}<small> MW needed</small></div><div className="metric-foot">{formatNumber(averageGeneration, 0)} MW produced · demand is {formatNumber(demandShare, 0)}% of reported generation.</div></article>
+              <article className="metric-card"><div className="metric-label">RENEWABLE PART OF PRODUCTION</div><div className="metric-value">{averageRenewableShare == null ? '—' : formatNumber(averageRenewableShare)}<small> %</small></div><div className="metric-foot">Average share of recorded power production from renewable sources.</div></article>
+            </section>
+            <p className="comparison-note">The demand/generation comparison uses hours where both readings are present. It is not spare capacity: imports, exports, storage, and incomplete source series affect the balance.</p>
+
+            <section className="chart-grid" aria-label="Hourly electricity and weather charts">
+              <article className="chart-card price-card"><div className="chart-heading"><div><span className="chart-index">01</span><h2>Wholesale price each hour</h2></div><span className="unit-tag">€ / MWh</span></div><p className="chart-caption">Cost for 1 MWh (1,000 kWh) on the wholesale market. Dashed line is the usual price at that hour in stored data; this is not a home electricity tariff.</p><ReactEChartsCore echarts={echarts} option={priceOption} style={{ height: 330 }} notMerge lazyUpdate /></article>
+              <article className="chart-card"><div className="chart-heading"><div><span className="chart-index">02</span><h2>Power produced by source</h2></div><span className="unit-tag">MW</span></div><p className="chart-caption">Each coloured area is a power source. Areas stack to show total recorded generation each hour; this is actual output, not maximum capacity.</p><ReactEChartsCore echarts={echarts} option={generationOption} style={{ height: 320 }} notMerge lazyUpdate /></article>
+              <article className="chart-card"><div className="chart-heading"><div><span className="chart-index">03</span><h2>Renewables in recorded production</h2></div><span className="unit-tag">%</span></div><p className="chart-caption">For example, 50% means half of the generation types with valid readings were renewable in that hour. It is not a share of household use.</p><ReactEChartsCore echarts={echarts} option={renewableOption} style={{ height: 320 }} notMerge lazyUpdate /></article>
+              <article className="chart-card"><div className="chart-heading"><div><span className="chart-index">04</span><h2>Power needed each hour (demand)</h2></div><span className="unit-tag">MW</span></div><p className="chart-caption">The provider’s estimate of power needed across the country at each hour. Compare it with reported generation above, allowing for trade and missing data.</p><ReactEChartsCore echarts={echarts} option={demandOption} style={{ height: 300 }} notMerge lazyUpdate /></article>
+              <article className="chart-card"><div className="chart-heading"><div><span className="chart-index">05</span><h2>Scheduled electricity traded across borders</h2></div><span className="unit-tag">MW</span></div><p className="chart-caption">Planned net electricity flow across interconnectors. Positive and negative directions follow the provider’s sign convention.</p><ReactEChartsCore echarts={echarts} option={flowOption} style={{ height: 300 }} notMerge lazyUpdate /></article>
+              <article className="chart-card weather-card"><div className="chart-heading"><div><span className="chart-index">06</span><h2>Weather near the market</h2></div><select aria-label="Weather measurement" className="small-select" value={weatherVariable} onChange={(event) => setWeatherVariable(event.target.value)}><option value="temperature">Air temperature (°C)</option><option value="wind_speed">Wind speed (m/s)</option><option value="shortwave_radiation">Sunlight (W/m²)</option></select></div><p className="chart-caption">{weatherDescriptions[weatherVariable]} One reference location in {data.market.country_code?.toUpperCase() || 'this country'}; it is not a national average.</p>{weatherRows.length ? <ReactEChartsCore echarts={echarts} option={weatherOption} style={{ height: 300 }} notMerge lazyUpdate /> : <div className="chart-empty">No {weatherLabels[weatherVariable].toLowerCase()} readings were returned for this period.</div>}</article>
             </section>
 
-            <section className="chart-grid">
-              <article className="chart-card price-card"><div className="chart-heading"><div><span className="chart-index">01</span><h2>Price history</h2></div><span className="unit-tag">EUR/MWh</span></div><p className="chart-caption">Solid line is observed price. Dashed line is the stored-data mean for the same UTC hour.</p><ReactEChartsCore echarts={echarts} option={priceOption} style={{ height: 310 }} notMerge lazyUpdate /></article>
-              <article className="chart-card"><div className="chart-heading"><div><span className="chart-index">02</span><h2>Generation mix</h2></div><span className="unit-tag">MW</span></div><p className="chart-caption">Country-level public production series from Energy-Charts.</p><ReactEChartsCore echarts={echarts} option={generationOption} style={{ height: 310 }} notMerge lazyUpdate /></article>
-              <article className="chart-card"><div className="chart-heading"><div><span className="chart-index">03</span><h2>Renewable share</h2></div><span className="unit-tag">%</span></div><p className="chart-caption">Calculated from the available valid renewable production types each hour.</p><ReactEChartsCore echarts={echarts} option={renewableOption} style={{ height: 310 }} notMerge lazyUpdate /></article>
-              <article className="chart-card"><div className="chart-heading"><div><span className="chart-index">04</span><h2>Demand</h2></div><span className="unit-tag">MW</span></div><p className="chart-caption">The provider’s public load series; this is power, not MWh consumed.</p><ReactEChartsCore echarts={echarts} option={demandOption} style={{ height: 290 }} notMerge lazyUpdate /></article>
-              <article className="chart-card"><div className="chart-heading"><div><span className="chart-index">05</span><h2>Cross-border trading</h2></div><span className="unit-tag">MW</span></div><p className="chart-caption">Net scheduled trading is shown with the provider’s sign unchanged.</p><ReactEChartsCore echarts={echarts} option={flowOption} style={{ height: 290 }} notMerge lazyUpdate /></article>
-              <article className="chart-card weather-card"><div className="chart-heading"><div><span className="chart-index">06</span><h2>Weather context</h2></div><select className="small-select" value={weatherVariable} onChange={(event) => setWeatherVariable(event.target.value)}><option value="temperature_2m">Temperature</option><option value="wind_speed_10m">Wind speed</option><option value="shortwave_radiation">Solar radiation</option></select></div><p className="chart-caption">Reference point in {data.market.country_code?.toUpperCase() || 'the selected country'}; not a whole-zone average.</p><ReactEChartsCore echarts={echarts} option={weatherOption} style={{ height: 290 }} notMerge lazyUpdate /></article>
-              <article className="quality-card"><div className="quality-heading"><span className="quality-icon">✓</span><div><h2>Coverage &amp; quality</h2><p>Observed records in this query window</p></div></div><div className="quality-list"><div><span>Expected market intervals</span><b>{data.window.expected_hourly_intervals}</b></div><div><span>Price intervals returned</span><b>{data.quality.price_intervals_returned}</b></div><div><span>Flagged price values</span><b className={data.quality.flagged_price_values ? 'warn-text' : ''}>{data.quality.flagged_price_values}</b></div><div><span>Unobserved hour slots · estimate</span><b className={data.quality.unobserved_hour_slots_estimate ? 'warn-text' : ''}>{data.quality.unobserved_hour_slots_estimate}</b></div><div><span>Generation / demand / flows</span><b>{data.quality.generation_rows} / {data.quality.demand_rows} / {data.quality.flow_rows}</b></div><div><span>Weather observations</span><b>{data.quality.weather_rows}</b></div><div><span>Flagged non-price records</span><b className={data.quality.flagged_power_weather_values ? 'warn-text' : ''}>{data.quality.flagged_power_weather_values}</b></div><div><span>Stale observations</span><b className={data.quality.stale_observations ? 'warn-text' : ''}>{data.quality.stale_observations}</b></div></div><div className="quality-note">A gap means no source interval was returned. It is not treated as zero.</div></article>
+            <section className="hourly-table-card"><div className="table-heading"><div><span className="chart-index">07</span><h2>Hour-by-hour details</h2></div><span>Local time · {dateRangeLabel}</span></div><p className="chart-caption">Read across a row to compare price, power needed, power produced, renewable share, and the chosen weather reading for that same hour.</p>
+              <div className="table-scroll"><table><thead><tr><th>Local hour</th><th>Wholesale price<br /><small>€ / MWh</small></th><th>Power needed<br /><small>MW</small></th><th>Power produced<br /><small>MW</small></th><th>Renewables<br /><small>% of production</small></th><th>{weatherLabels[weatherVariable]}<br /><small>{weatherUnit || 'reading'}</small></th></tr></thead><tbody>
+                {hourlyRows.map((row) => <tr key={row.key}><td>{row.time}</td><td>{row.price == null ? '—' : `€${formatNumber(row.price)}`}</td><td>{formatNumber(row.demand, 0)}</td><td>{formatNumber(row.generation, 0)}</td><td>{row.renewableShare == null ? '—' : formatNumber(row.renewableShare)}%</td><td>{formatNumber(row.weather, 1)}</td></tr>)}
+              </tbody></table></div>
+              <p className="table-note">Generation is the sum of available valid source readings for that hour. A dash means no valid reading; it does not mean zero.</p>
             </section>
 
-            <section className="lineage-panel"><div className="lineage-title"><span>↗</span><b>DATA LINEAGE</b><small>Charts map to tested Gold models and the exact raw response hashes used.</small></div><div className="lineage-items">{Object.entries(data.lineage).map(([name, source]) => <div key={name}><b>{name.replaceAll('_', ' ')}</b><span>{source}</span></div>)}</div><div className="source-traces">{data.source_trace.map((source) => <div key={`${source.model}-${source.raw_sha256}`}><b>{source.measure} · {source.model}</b><span>{source.provider} / {source.dataset} · {source.record_count} rows</span><code title={source.raw_sha256}>raw SHA-256 {source.raw_sha256.slice(0, 16)}…</code></div>)}</div></section>
+            <details className="quality-panel"><summary>Data coverage and where it came from</summary><div className="quality-list"><div><span>Expected price hours</span><b>{data.window.expected_hourly_intervals}</b></div><div><span>Price readings returned</span><b>{data.quality.price_intervals_returned}</b></div><div><span>Price readings needing review</span><b>{data.quality.flagged_price_values}</b></div><div><span>Hours without a price reading · estimate</span><b>{data.quality.unobserved_hour_slots_estimate}</b></div><div><span>Generation / demand / flow readings</span><b>{data.quality.generation_rows} / {data.quality.demand_rows} / {data.quality.flow_rows}</b></div><div><span>Weather readings</span><b>{data.quality.weather_rows}</b></div><div><span>Stale readings</span><b>{data.quality.stale_observations}</b></div></div><div className="lineage-items">{Object.entries(data.lineage).map(([name, source]) => <div key={name}><b>{name.replaceAll('_', ' ')}</b><span>{source}</span></div>)}</div><div className="source-traces">{data.source_trace.map((source) => <div key={`${source.model}-${source.raw_sha256}`}><b>{source.measure} · {source.model}</b><span>{source.provider} / {source.dataset} · {source.record_count} rows</span><code title={source.raw_sha256}>raw SHA-256 {source.raw_sha256.slice(0, 16)}…</code></div>)}</div></details>
           </>}
-          {!loading && !error && !data && <div className="empty-state">Choose a market zone and date range to inspect available records.</div>}
-          <footer className="page-footer"><span>EUROGRID INTELLIGENCE <i>·</i> PHASE 5</span><span>Inputs: tested dbt Gold models <i>·</i> Local DuckDB</span></footer>
+          {!loading && !error && !data && <div className="empty-state">Choose a market area and date range to inspect its hourly readings.</div>}
+          <footer className="page-footer"><span>EUROGRID INTELLIGENCE <i>·</i> LOCAL RESEARCH SAMPLE</span><span>Source: tested dbt models <i>·</i> DuckDB</span></footer>
         </div>
       </section>
     </main>

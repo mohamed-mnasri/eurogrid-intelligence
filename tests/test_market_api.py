@@ -49,7 +49,9 @@ class MarketApiTests(unittest.TestCase):
         db.execute("""CREATE TABLE gold_weather (
             interval_start_utc TIMESTAMPTZ,original_timestamp VARCHAR,variable VARCHAR,weather_value DOUBLE,
             weather_unit VARCHAR,data_status VARCHAR,provider VARCHAR,dataset VARCHAR,raw_sha256 VARCHAR,country_code VARCHAR)""")
-        db.execute("INSERT INTO gold_weather VALUES ('2025-01-01 00:00:00+00','2025-01-01T00:00:00', 'temperature',8,'°C','valid','open-meteo','historical_weather','hash7','fr')")
+        db.execute("""INSERT INTO gold_weather VALUES
+            ('2024-12-31 23:00:00+00','2024-12-31T23:00:00Z','temperature',7,'°C','valid','open-meteo','historical_weather','hash0','fr'),
+            ('2025-01-01 00:00:00+00','2025-01-01T00:00:00Z','temperature',8,'°C','valid','open-meteo','historical_weather','hash7','fr')""")
         db.close()
         self.app = create_app(self.database)
 
@@ -68,7 +70,10 @@ class MarketApiTests(unittest.TestCase):
         self.assertEqual(len(payload["generation"]), 1)
         self.assertEqual(len(payload["demand"]), 1)
         self.assertEqual(len(payload["cross_border_flows"]), 1)
-        self.assertEqual(len(payload["weather"]), 1)
+        # Include UTC weather from the prior date when it belongs to local midnight in France.
+        self.assertEqual(len(payload["weather"]), 2)
+        self.assertEqual({row["original_timestamp"] for row in payload["weather"]},
+                         {"2024-12-31T23:00:00Z", "2025-01-01T00:00:00Z"})
         self.assertEqual(payload["quality"]["flagged_price_values"], 1)
         self.assertEqual(payload["quality"]["unobserved_hour_slots_estimate"], 21)
         self.assertIn("gold_market_price", payload["lineage"]["prices"])
