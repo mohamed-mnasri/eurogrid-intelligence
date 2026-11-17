@@ -64,6 +64,14 @@ Use `python -m eurogrid.cli --help` or follow the [Phase 2 guide](docs/phase2.md
 
 Install dependencies with `python -m pip install -r requirements.txt`, then follow the [Phase 3 guide](docs/phase3.md) to create and inspect the local DuckDB model.
 
+## Phase 4 dbt models
+
+The dbt sources, staging views, Gold marts, and quality checks are described in the [Phase 4 guide](docs/phase4.md).
+
+## Phase 5 market overview
+
+The React dashboard, FastAPI read endpoints, five-market sample, and startup steps are in the [Phase 5 guide](docs/phase5.md).
+
 ## Data and security rules
 
 - Treat source terms and returned licence metadata as authoritative for each dataset.
@@ -74,4 +82,4 @@ Install dependencies with `python -m pip install -r requirements.txt`, then foll
 
 ## Current limits
 
-Day-ahead prices are zone-scoped and licensed per response; the sample only requests DE-LU. Generation uses the provider-supported all-Europe selector, but that does not guarantee every country/fuel/interval is complete. The sample runner records source terms and raw responses for inspection. ENTSO-E still requires a separately requested user token and is not included. These connectors are proof-of-concept only and do not yet load Parquet, DuckDB or dbt.
+The market overview is currently validated for DE-LU, FR, ES, IT-North, and NL over a bounded January 2025 sample. This is not complete pan-European data coverage. Generation/load and net trading availability varies by country and provider series. ENTSO-E still requires a separately requested user token and is not included. The database and sample responses remain local; review source terms before redistributing them.
