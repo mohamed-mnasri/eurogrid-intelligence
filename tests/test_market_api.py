@@ -103,6 +103,7 @@ class MarketApiTests(unittest.TestCase):
         self.assertEqual(len(payload["prices"]), 2)
         self.assertEqual(payload["prices"][0]["price_eur_per_mwh"], 40)
         self.assertEqual(payload["prices"][0]["market_count"], 1)
+        self.assertEqual(payload["prices"][0]["market_names"], ["France"])
         self.assertIn("indicative comparison", payload["lineage"]["prices"])
 
     def test_api_rejects_unknown_zone_and_ranges_longer_than_31_days(self):

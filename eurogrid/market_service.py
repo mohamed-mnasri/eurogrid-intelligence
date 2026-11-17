@@ -267,17 +267,21 @@ class MarketService:
             if baseline is not None:
                 bucket["baseline"].append(float(baseline))
 
-        across_zones: dict[str, dict[str, list[float]]] = {}
-        for (_, hour), bucket in per_zone_hour.items():
+        across_zones: dict[str, dict[str, Any]] = {}
+        for (zone, hour), bucket in per_zone_hour.items():
             summary = across_zones.setdefault(hour, {"price": [], "baseline": []})
+            if bucket["price"]:
+                summary.setdefault("zones", []).append(zone)
             for name in ("price", "baseline"):
                 if bucket[name]:
                     summary[name].append(sum(bucket[name]) / len(bucket[name]))
         result = []
+        market_by_zone = {market["bidding_zone"]: market["market_name"] for market in markets}
         for hour, summary in sorted(across_zones.items()):
             if not summary["price"]:
                 continue
             start_utc = datetime.fromisoformat(hour)
+            market_names = sorted({market_by_zone.get(zone, zone) for zone in summary.get("zones", [])})
             result.append({
                 "interval_start_utc": start_utc.isoformat(),
                 "interval_end_utc": (start_utc + timedelta(hours=1)).isoformat(),
@@ -292,6 +296,7 @@ class MarketService:
                 "dataset": "indicative_average_of_country_markets",
                 "raw_sha256": "",
                 "market_count": len(summary["price"]),
+                "market_names": market_names,
             })
         return result
 
