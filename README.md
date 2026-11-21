@@ -84,6 +84,10 @@ Hourly household PV and battery simulation (PVGIS or a documented weather model)
 
 The FastAPI endpoints for coverage, market series, anomalies, investigations, evidence, approved tools and simulations, with their limits and Swagger UI, are described in the [Phase 8 guide](docs/phase8.md).
 
+## Phase 9 local LLM agent
+
+A LangGraph investigation agent using a local Ollama model, with typed tools, a call budget and code-checked evidence references, is described in the [Phase 9 guide](docs/phase9.md).
+
 ## Data and security rules
 
 - Treat source terms and returned licence metadata as authoritative for each dataset.

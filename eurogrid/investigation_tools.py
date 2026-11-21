@@ -146,12 +146,25 @@ def comparable_change(series: dict[datetime, float], start: datetime, end: datet
     observed_mean = mean(observed.values()) if observed else None
     baseline_mean = mean(baseline_values) if baseline_values else None
     change = (observed_mean - baseline_mean) if observed_mean is not None and baseline_mean is not None else None
-    change_pct = (change / abs(baseline_mean) * 100) if change is not None and baseline_mean else None
+    change_pct = percent_change(observed_mean, baseline_mean)
     return {
         "observed_mean": _round(observed_mean), "baseline_mean": _round(baseline_mean),
         "change": _round(change), "change_pct": _round(change_pct, 1),
         "observed_hours": len(observed), "baseline_values": len(baseline_values),
     }
+
+
+def percent_change(observed: float | None, baseline: float | None) -> float | None:
+    """Percentage change, or None when a percentage would mislead.
+
+    A percentage only means something when the baseline is clearly away from zero and the sign did not
+    flip (net flows and prices can be negative); otherwise only the absolute change should be quoted.
+    """
+    if observed is None or not baseline or observed * baseline <= 0:
+        return None
+    if abs(baseline) < 0.05 * max(abs(observed), abs(baseline)):
+        return None
+    return (observed - baseline) / abs(baseline) * 100
 
 
 def _round(value: float | None, digits: int = 3) -> float | None:
@@ -270,9 +283,7 @@ class InvestigationTools:
             "baseline_rule": f"median/MAD of the same local hour and day type over the prior {config.window_days} days",
             "threshold": config.threshold,
         }
-        if summary["observed_mean"] is not None and summary["baseline_median_mean"]:
-            summary["change_pct"] = _round((summary["observed_mean"] - summary["baseline_median_mean"])
-                                           / abs(summary["baseline_median_mean"]) * 100, 1)
+        summary["change_pct"] = _round(percent_change(summary["observed_mean"], summary["baseline_median_mean"]), 1)
         return make_result("compare_price_baseline", self._params(request, detector=config.__dict__),
                            ["gold_market_price"], status, summary, sources, unit="EUR/MWh")
 

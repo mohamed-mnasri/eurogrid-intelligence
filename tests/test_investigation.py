@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from eurogrid.investigation import CaseStore, detect_price_anomalies, investigate, render_markdown
-from eurogrid.investigation_tools import InvestigationTools, ToolError
+from eurogrid.investigation_tools import InvestigationTools, ToolError, percent_change
 from tests.sample_db import build_sample_database
 
 UTC = timezone.utc
@@ -77,6 +77,13 @@ class ToolTests(InvestigationTestCase):
         result = self.tools.compare_neighbour_prices("DE-LU", START, END)
         self.assertEqual(list(result.summary["neighbours"]), ["FR"])
         self.assertLess(abs(result.summary["neighbours"]["FR"]["change_pct"]), 5)
+
+    def test_percent_change_is_withheld_when_it_would_mislead(self):
+        self.assertEqual(percent_change(110.0, 100.0), 10.0)
+        self.assertEqual(percent_change(-90.0, -100.0), 10.0)       # less negative = up
+        self.assertIsNone(percent_change(1500.0, 1.0))               # baseline near zero
+        self.assertIsNone(percent_change(800.0, -200.0))             # net flow changed direction
+        self.assertIsNone(percent_change(50.0, 0.0))
 
     def test_weather_rejects_unknown_variables(self):
         with self.assertRaises(ToolError):
