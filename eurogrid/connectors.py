@@ -225,8 +225,15 @@ class PVGISConnector:
         year: int,
         peak_power_kw: float = 1.0,
         loss_percent: float = 14.0,
+        angle: float | None = None,
+        aspect: float | None = None,
     ) -> SourceSample:
-        """Fetch one calendar year's hourly PVGIS reference series."""
+        """Fetch one calendar year's hourly PVGIS reference series.
+
+        ``angle`` is panel tilt (0 = horizontal) and ``aspect`` the orientation
+        (0 = south, -90 = east, 90 = west). They are only sent when given, so
+        earlier cached requests keep the same identity.
+        """
         params = {
             "lat": latitude,
             "lon": longitude,
@@ -237,6 +244,10 @@ class PVGISConnector:
             "loss": loss_percent,
             "outputformat": "json",
         }
+        if angle is not None:
+            params["angle"] = angle
+        if aspect is not None:
+            params["aspect"] = aspect
         payload = self.client.get_json(f"{PVGIS}/seriescalc", params=params)
         outputs = payload.get("outputs")
         hourly = outputs.get("hourly") if isinstance(outputs, dict) else None

@@ -76,6 +76,10 @@ The React dashboard, FastAPI read endpoints, Europe/country market sample, and s
 
 Robust comparable-hour price anomaly detection, approved read-only investigation tools with evidence records, and rule-based reports (no LLM) are described in the [Phase 6 guide](docs/phase6.md).
 
+## Phase 7 renewable simulation engine
+
+Hourly household PV and battery simulation (PVGIS or a documented weather model), fixed and dynamic tariffs, payback, NPV and sensitivity analysis are described in the [Phase 7 guide](docs/phase7.md).
+
 ## Data and security rules
 
 - Treat source terms and returned licence metadata as authoritative for each dataset.
