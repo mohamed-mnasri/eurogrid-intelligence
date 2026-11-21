@@ -72,6 +72,10 @@ The dbt sources, staging views, Gold marts, and quality checks are described in 
 
 The React dashboard, FastAPI read endpoints, Europe/country market sample, and startup steps are in the [Phase 5 guide](docs/phase5.md).
 
+## Phase 6 anomaly detection and investigations
+
+Robust comparable-hour price anomaly detection, approved read-only investigation tools with evidence records, and rule-based reports (no LLM) are described in the [Phase 6 guide](docs/phase6.md).
+
 ## Data and security rules
 
 - Treat source terms and returned licence metadata as authoritative for each dataset.
