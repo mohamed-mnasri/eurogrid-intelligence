@@ -98,6 +98,8 @@ class CaseStore:
                     report_id TEXT PRIMARY KEY, anomaly_id TEXT NOT NULL, generator TEXT NOT NULL,
                     status TEXT NOT NULL, created_at TEXT NOT NULL, payload TEXT NOT NULL);
                 CREATE INDEX IF NOT EXISTS report_anomaly ON investigation_report(anomaly_id, created_at);
+                CREATE TABLE IF NOT EXISTS agent_trace (
+                    report_id TEXT PRIMARY KEY, created_at TEXT NOT NULL, payload TEXT NOT NULL);
             """)
 
     @contextmanager
@@ -168,6 +170,54 @@ class CaseStore:
         with self._db() as db:
             row = db.execute("SELECT payload FROM investigation_report WHERE report_id=?", [report_id]).fetchone()
         return json.loads(row[0]) if row else None
+
+    def list_reports(self, anomaly_id: str) -> list[dict]:
+        """Every stored report for an anomaly (all generators), newest first, as summaries."""
+        with self._db() as db:
+            rows = db.execute("""SELECT report_id, generator, status, created_at FROM investigation_report
+                WHERE anomaly_id=? ORDER BY created_at DESC""", [anomaly_id]).fetchall()
+        return [{"report_id": a, "generator": b, "status": c, "created_at": d} for a, b, c, d in rows]
+
+    def save_trace(self, report_id: str, trace: dict) -> None:
+        """Agent activity trace (node path, who chose each tool, the model's raw draft)."""
+        with self._db() as db:
+            db.execute("INSERT OR REPLACE INTO agent_trace VALUES (?,?,?)",
+                       (report_id, datetime.now(UTC).isoformat(), json.dumps(trace)))
+
+    def get_trace(self, report_id: str) -> dict | None:
+        with self._db() as db:
+            row = db.execute("SELECT payload FROM agent_trace WHERE report_id=?", [report_id]).fetchone()
+        return json.loads(row[0]) if row else None
+
+
+def material_change(tool_name: str, summary: dict[str, Any], spike: bool) -> bool:
+    """Does this evidence show a change large enough (by the written RULES) to be called "coinciding"?
+
+    The same thresholds the rule-based investigator uses; applied by code to the agent's draft so a model
+    cannot present an unchanged series as a relationship. Price/quality evidence describes the event itself
+    and is never a coinciding factor.
+    """
+    if tool_name == "get_generation_mix":
+        change = (summary.get("groups", {}).get("wind_and_solar") or {}).get("change_pct")
+        return change is not None and (change <= -RULES["renewable_change_pct"] if spike
+                                       else change >= RULES["renewable_change_pct"])
+    if tool_name == "compare_demand":
+        change = summary.get("change_pct")
+        return change is not None and (change >= RULES["demand_change_pct"] if spike
+                                       else change <= -RULES["demand_change_pct"])
+    if tool_name == "get_cross_border_flows":
+        change = summary.get("change")
+        return change is not None and abs(change) >= RULES["flow_change_mw"]
+    if tool_name == "compare_neighbour_prices":
+        moved = [item.get("change_pct") for item in summary.get("neighbours", {}).values()
+                 if item.get("change_pct") is not None]
+        threshold = RULES["neighbour_shared_change_pct"]
+        shared = [pct for pct in moved if (pct >= threshold if spike else pct <= -threshold)]
+        return bool(moved) and len(shared) * 2 >= len(moved)
+    if tool_name == "get_weather_context":
+        return any(abs(item.get("change_pct") or 0) >= RULES["renewable_change_pct"]
+                   for item in summary.get("variables", {}).values() if isinstance(item, dict))
+    return False
 
 
 # ------------------------------------------------------------------- detection
@@ -260,7 +310,7 @@ def investigate(event: dict[str, Any], tools: InvestigationTools) -> Investigati
                 coinciding.append(Finding(statement=text, evidence_ids=evidence))
                 plausible.append(Finding(statement=(
                     f"{'Lower' if spike else 'Higher'} wind/solar output coincided with the price {event['direction']} "
-                    "and may have contributed; this is consistent with, not proof of, a supply effect."),
+                    "and may have contributed; the data shows a coincidence, not a demonstrated supply effect."),
                     evidence_ids=evidence))
             else:
                 observations.append(Finding(statement=text + " This is not a large enough change to suggest a renewable-supply effect.",

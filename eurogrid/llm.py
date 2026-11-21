@@ -24,6 +24,19 @@ class LLM(Protocol):
     def structured(self, system: str, user: str, schema: type[T]) -> T: ...
 
 
+def ollama_status(model: str) -> tuple[bool, str]:
+    """Check that the Ollama server is reachable and the model is downloaded (no generation)."""
+    try:
+        import ollama
+
+        names = {item.model for item in ollama.list().models}
+    except Exception as exc:  # server not running, library missing, connection refused
+        return False, f"Ollama is not reachable ({exc}). Start Ollama and try again."
+    if model not in names and f"{model}:latest" not in names:
+        return False, f"Model {model} is not downloaded; run: ollama pull {model}"
+    return True, "ok"
+
+
 class OllamaLLM:
     """Local model served by Ollama (http://localhost:11434)."""
 

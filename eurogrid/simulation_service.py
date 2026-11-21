@@ -132,3 +132,26 @@ class SimulationService:
         return {"simulation_id": simulation_id, "system_id": system_id, "total": len(hours), "offset": offset,
                 "limit": limit, "next_offset": end if end < len(hours) else None, "unit": "kWh per hour; prices EUR/kWh",
                 "items": items}
+
+    def monthly(self, simulation_id: str, system_id: str) -> dict[str, Any]:
+        """Seasonal energy balance: hourly flows summed per calendar month, plus energy cost.
+
+        Months are UTC months because the simulation year is defined as the year's UTC hours, so the totals add
+        up exactly to the annual results.
+        """
+        hourly = json.loads(self._row(simulation_id, "hourly")[0])
+        if system_id not in hourly or system_id == "_hours":
+            raise NotFoundError(f"System {system_id} is not part of simulation {simulation_id}")
+        columns = hourly[system_id]
+        fields = [name for name in HOURLY_FIELDS if name != "soc_end_kwh"]
+        months: dict[str, dict[str, float]] = {}
+        for index, stamp in enumerate(hourly["_hours"]):
+            month = stamp[:7]
+            item = months.setdefault(month, {name: 0.0 for name in [*fields, "import_cost_eur", "export_revenue_eur"]})
+            for name in fields:
+                item[name] += columns[name][index]
+            item["import_cost_eur"] += columns["grid_import_kwh"][index] * columns["import_price_eur_per_kwh"][index]
+            item["export_revenue_eur"] += columns["grid_export_kwh"][index] * columns["export_price_eur_per_kwh"][index]
+        return {"simulation_id": simulation_id, "system_id": system_id, "timezone": "UTC",
+                "unit": "kWh per month; EUR", "items": [{"month": month, **{k: round(v, 3) for k, v in item.items()}}
+                                                         for month, item in sorted(months.items())]}

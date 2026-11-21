@@ -131,6 +131,10 @@ class DetectResponse(BaseModel):
 
 class InvestigationRequest(BaseModel):
     anomaly_id: str = Field(pattern=r"^anm_[0-9a-f]{16}$")
+    generator: Literal["rule-based", "agent"] = Field(
+        default="rule-based", description="rule-based (deterministic) or agent (Phase 9 LangGraph + local Ollama model)")
+    model: str = Field(default="qwen3.5:4b", pattern=r"^[a-zA-Z0-9._:-]{1,64}$")
+    max_tool_calls: int = Field(default=6, ge=1, le=10)
 
 
 class ToolRequest(BaseModel):

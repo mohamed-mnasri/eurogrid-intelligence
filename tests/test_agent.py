@@ -84,10 +84,21 @@ class AgentTests(AgentTestCase):
         self.assertTrue((self.out / f"{report['report_id']}_trace.json").exists())
         self.assertEqual(self.store.latest_report(self.anomaly_id, "langgraph-fake")["report_id"], report["report_id"])
 
+    def test_relationships_without_a_material_change_are_refiled_as_observations(self):
+        dry = self.run_agent(FakeLLM(["compare_neighbour_prices", "finish"]))
+        neighbours = self.evidence_id(dry, "compare_neighbour_prices")   # FR stays calm in the sample
+        final = self.run_agent(FakeLLM(["compare_neighbour_prices", "finish"], [
+            {"category": "coinciding", "statement": "France was priced near its usual level.", "evidence_ids": [neighbours]}]))
+        report = final["report"]
+        self.assertEqual(report["coinciding_relationships"], [])
+        self.assertEqual([f["statement"] for f in report["observations"]], ["France was priced near its usual level."])
+        self.assertIn("re-filed as observations", " ".join(report["limitations"]))
+
     def test_tool_budget_and_invalid_model_replies(self):
         final = self.run_agent(FakeLLM(["INVALID"] * 10), max_tool_calls=2)
         chosen = [c for c in final["tool_trace"] if c["tool_name"] != "get_data_quality_status"]
-        self.assertEqual(len([c for c in chosen if c["chosen_by"] == "model"]), 2)   # stopped at the budget
+        fallback = [c for c in chosen if c["chosen_by"] == "code (model reply was invalid)"]
+        self.assertEqual(len(fallback), 2)   # stopped at the budget, and the trace says code chose them
         self.assertIn("by code (model reply was invalid)", " ".join(final["node_trace"]))
 
     def test_outage_tool_is_recorded_as_missing_not_as_a_finding(self):

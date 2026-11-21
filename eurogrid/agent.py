@@ -32,7 +32,8 @@ from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
 
 from eurogrid.agent_tools import TOOL_DESCRIPTIONS, PolicyViolation, ToolCallRequest, ToolPolicy, execute_tool
-from eurogrid.investigation import CaseStore, Finding, InvestigationReport, ToolCall, render_markdown
+from eurogrid.investigation import (RULES, CaseStore, Finding, InvestigationReport, ToolCall, material_change,
+                                   render_markdown)
 from eurogrid.investigation_tools import Evidence, InvestigationTools
 from eurogrid.llm import LLM, LLMError, OllamaLLM
 
@@ -54,6 +55,7 @@ class AgentState(TypedDict, total=False):
     tool_trace: list[dict[str, Any]]
     node_trace: list[str]
     next_tool: str
+    next_tool_by: str
     draft_findings: list[dict[str, Any]]
     report: dict[str, Any]
     status: str
@@ -136,7 +138,8 @@ def build_graph(tools: InvestigationTools, store: CaseStore, llm: LLM, max_tool_
             choice, chosen_by = (remaining[0] if remaining else "finish"), "code (model reply was invalid)"
         if choice != "finish" and choice not in remaining:
             choice, chosen_by = (remaining[0] if remaining else "finish"), "code (model repeated a tool)"
-        return {"next_tool": choice, "node_trace": state["node_trace"] + [f"choose_tool:{choice} by {chosen_by}"]}
+        return {"next_tool": choice, "next_tool_by": chosen_by,
+                "node_trace": state["node_trace"] + [f"choose_tool:{choice} by {chosen_by}"]}
 
     def run_tool(state: AgentState) -> AgentState:
         window = policy(state)
@@ -153,7 +156,8 @@ def build_graph(tools: InvestigationTools, store: CaseStore, llm: LLM, max_tool_
             missing.append(f"{result.tool_name} returned {result.status}: " + "; ".join(result.notes))
         trace = state["tool_trace"] + [{"step": len(state["tool_trace"]) + 1, "tool_name": result.tool_name,
                                         "parameters": result.evidence.parameters, "status": result.status,
-                                        "evidence_id": result.evidence.evidence_id, "chosen_by": "model"}]
+                                        "evidence_id": result.evidence.evidence_id,
+                                        "chosen_by": state.get("next_tool_by", "model")}]
         return {"available_evidence": state["available_evidence"] + [result.evidence.model_dump()],
                 "missing_evidence": missing, "tool_trace": trace,
                 "node_trace": state["node_trace"] + [f"run_tool:{result.tool_name}"]}
@@ -193,8 +197,10 @@ def build_graph(tools: InvestigationTools, store: CaseStore, llm: LLM, max_tool_
         """Step 6 rules, applied by code: keep only findings backed by usable evidence."""
         usable = {e["evidence_id"] for e in state["available_evidence"] if e["status"] not in UNUSABLE}
         known = {e["evidence_id"] for e in state["available_evidence"]}
+        by_id = {e["evidence_id"]: e for e in state["available_evidence"]}
+        spike = (state.get("anomaly") or {}).get("direction") == "spike"
         kept: dict[str, list[Finding]] = {"observation": [], "coinciding": [], "plausible": []}
-        rejected = []
+        rejected, refiled = [], []
         for item in state.get("draft_findings", []):
             ids = [ref.strip("[] ") for ref in item["evidence_ids"]]
             if not ids or not set(ids) <= known:
@@ -204,7 +210,13 @@ def build_graph(tools: InvestigationTools, store: CaseStore, llm: LLM, max_tool_
             elif CAUSAL_WORDS.search(item["statement"]):
                 rejected.append(f"unsupported causal claim: {item['statement'][:80]}")
             else:
-                kept[item["category"]].append(Finding(statement=item["statement"], evidence_ids=ids))
+                category = item["category"]
+                # A relationship needs at least one cited series that changed by the written rule thresholds.
+                if category != "observation" and not any(
+                        material_change(by_id[ref]["tool_name"], by_id[ref]["result"], spike) for ref in ids):
+                    refiled.append(item["statement"][:80])
+                    category = "observation"
+                kept[category].append(Finding(statement=item["statement"], evidence_ids=ids))
 
         domains = (state.get("quality") or {}).get("domains", {})
         confidence = {name: domains.get(key, {"status": "unknown"}) for name, key in (
@@ -222,6 +234,9 @@ def build_graph(tools: InvestigationTools, store: CaseStore, llm: LLM, max_tool_
                        "No cause is marked as proven: the available public data cannot establish causation."]
         if rejected:
             limitations.append(f"{len(rejected)} drafted statement(s) were removed: " + " | ".join(rejected))
+        if refiled:
+            limitations.append(f"{len(refiled)} drafted relationship(s) were re-filed as observations because the cited "
+                               "evidence shows no material change under the rule thresholds: " + " | ".join(refiled))
         generator = f"langgraph-{llm.name}"
         evidence = [Evidence(**e) for e in state["available_evidence"]]
         report_id = "rpt_" + hashlib.sha256(json.dumps(
@@ -234,7 +249,7 @@ def build_graph(tools: InvestigationTools, store: CaseStore, llm: LLM, max_tool_
             observations=kept["observation"], coinciding_relationships=kept["coinciding"],
             plausible_contributing_factors=kept["plausible"], proven_causes=[],
             missing_evidence=state["missing_evidence"], limitations=limitations,
-            rules={"max_tool_calls": float(max_tool_calls)},
+            rules={"max_tool_calls": float(max_tool_calls), **RULES},
             tool_trace=[ToolCall(**{k: v for k, v in call.items() if k != "chosen_by"}) for call in state["tool_trace"]],
             evidence=evidence)
         return {"report": report.model_dump(), "status": status,
@@ -282,6 +297,7 @@ def run_investigation(anomaly_id: str, tools: InvestigationTools, store: CaseSto
              "tool_trace": final["tool_trace"], "draft_findings": final.get("draft_findings", []),
              "missing_evidence": final["missing_evidence"], "status": final["status"]}
     (out_dir / f"{report.report_id}_trace.json").write_text(json.dumps(trace, indent=2), encoding="utf-8")
+    store.save_trace(report.report_id, trace)
     return final
 
 

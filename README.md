@@ -88,6 +88,10 @@ The FastAPI endpoints for coverage, market series, anomalies, investigations, ev
 
 A LangGraph investigation agent using a local Ollama model, with typed tools, a call budget and code-checked evidence references, is described in the [Phase 9 guide](docs/phase9.md).
 
+## Phase 10 web application
+
+The six-page React app (Market Overview, Market Analytics, AI Investigations, Renewable Planner, Data Operations, Scenario Lab), its endpoints and the synthetic evaluation suite are described in the [Phase 10 guide](docs/phase10.md).
+
 ## Data and security rules
 
 - Treat source terms and returned licence metadata as authoritative for each dataset.

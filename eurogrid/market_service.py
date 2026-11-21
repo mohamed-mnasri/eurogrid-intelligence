@@ -325,6 +325,64 @@ class MarketService:
             "source": "Valid day-ahead wholesale observations, averaged first to UTC hours and then by calendar month.",
         }
 
+    def price_comparison(self, year: int) -> dict[str, Any]:
+        """Monthly average of valid day-ahead prices for every priced country zone (Market Analytics)."""
+        markets = [row for row in self.coverage() if row["has_prices"] and not row["is_aggregate"]]
+        if not markets:
+            return {"year": year, "markets": [], "source": "No priced bidding zones are ingested."}
+        zones = [row["bidding_zone"] for row in markets]
+        placeholders = ",".join("?" for _ in zones)
+        try:
+            with self._connect() as db:
+                rows = self._dict_rows(db, f"""SELECT bidding_zone, substr(original_timestamp,1,7) AS month,
+                    avg(price_eur_per_mwh) AS mean_price, min(price_eur_per_mwh) AS min_price,
+                    max(price_eur_per_mwh) AS max_price, count(*) AS intervals,
+                    count(*) FILTER (WHERE price_eur_per_mwh < 0) AS negative_intervals
+                    FROM gold_market_price
+                    WHERE bidding_zone IN ({placeholders}) AND data_status='valid'
+                      AND substr(original_timestamp,1,4)=?
+                    GROUP BY ALL ORDER BY bidding_zone, month""", [*zones, str(year)])
+        except duckdb.Error as exc:
+            raise MarketDataError(f"Gold market-price models are missing or failed to query: {exc}") from exc
+        by_zone: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            by_zone.setdefault(row["bidding_zone"], []).append({
+                "month": row["month"], "mean_eur_per_mwh": round(float(row["mean_price"]), 3),
+                "min_eur_per_mwh": round(float(row["min_price"]), 3), "max_eur_per_mwh": round(float(row["max_price"]), 3),
+                "intervals": int(row["intervals"]), "negative_intervals": int(row["negative_intervals"])})
+        return {
+            "year": year,
+            "markets": [{"bidding_zone": row["bidding_zone"], "market_name": row["market_name"],
+                         "months": by_zone.get(row["bidding_zone"], [])} for row in markets],
+            "source": "Valid day-ahead intervals from gold_market_price, grouped by local calendar month. "
+                      "15-minute and hourly intervals are averaged as reported.",
+        }
+
+    def price_profile(self, bidding_zone: str, year: int) -> dict[str, Any]:
+        """Average price by local month and local hour of day for one zone (seasonality heatmap)."""
+        markets = {row["bidding_zone"]: row for row in self.coverage()}
+        market = markets.get(bidding_zone)
+        if market is None or not market["has_prices"] or market["is_aggregate"]:
+            raise MarketDataError(f"No bidding-zone prices for {bidding_zone}")
+        try:
+            with self._connect() as db:
+                rows = self._dict_rows(db, """SELECT CAST(substr(original_timestamp,6,2) AS INTEGER) AS month,
+                    CAST(substr(original_timestamp,12,2) AS INTEGER) AS hour,
+                    avg(price_eur_per_mwh) AS mean_price, count(*) AS intervals
+                    FROM gold_market_price
+                    WHERE bidding_zone=? AND data_status='valid' AND substr(original_timestamp,1,4)=?
+                    GROUP BY ALL ORDER BY month, hour""", [bidding_zone, str(year)])
+        except duckdb.Error as exc:
+            raise MarketDataError(f"Gold market-price models are missing or failed to query: {exc}") from exc
+        return {
+            "bidding_zone": bidding_zone, "market_name": market["market_name"], "year": year,
+            "timezone": market["source_timezone"], "unit": "EUR/MWh",
+            "cells": [{"month": int(row["month"]), "hour": int(row["hour"]),
+                       "mean_eur_per_mwh": round(float(row["mean_price"]), 2), "intervals": int(row["intervals"])}
+                      for row in rows],
+            "source": "Valid day-ahead intervals from gold_market_price, grouped by the source's local month and hour.",
+        }
+
     @classmethod
     def _country_price_hours(cls, db, bidding_zone: str, year: int) -> list[dict[str, Any]]:
         """Read and average a country's valid 15/60-minute prices into UTC hours."""
