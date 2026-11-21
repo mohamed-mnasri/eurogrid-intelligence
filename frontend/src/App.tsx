@@ -5,6 +5,7 @@ import './app.css'
 import { getJson, daysSince } from './lib/api'
 import { Loading } from './components/States'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { ChaosPanel } from './components/ChaosPanel'
 
 // Each page is its own chunk, loaded when first opened.
 const MarketOverview = lazy(() => import('./pages/MarketOverview'))
@@ -13,6 +14,7 @@ const Investigations = lazy(() => import('./pages/Investigations'))
 const Planner = lazy(() => import('./pages/Planner'))
 const DataOperations = lazy(() => import('./pages/DataOperations'))
 const ScenarioLab = lazy(() => import('./pages/ScenarioLab'))
+const Replay = lazy(() => import('./pages/Replay'))
 
 type Route = { id: string; label: string; hint: string }
 const ROUTES: Route[] = [
@@ -20,6 +22,7 @@ const ROUTES: Route[] = [
   { id: 'analytics', label: 'Market Analytics', hint: 'Countries, seasons, anomalies' },
   { id: 'investigations', label: 'AI Investigations', hint: 'Cases, evidence, trace' },
   { id: 'planner', label: 'Renewable Planner', hint: 'Solar + battery payback' },
+  { id: 'replay', label: 'Event Replay', hint: 'Market event → household' },
   { id: 'operations', label: 'Data Operations', hint: 'Connectors, tests, freshness' },
   { id: 'lab', label: 'Scenario Lab', hint: 'Synthetic evaluation' },
 ]
@@ -71,7 +74,8 @@ export default function App() {
       {route.page === 'analytics' && <MarketAnalytics />}
       {route.page === 'investigations' && <Investigations anomalyId={route.param} />}
       {route.page === 'planner' && <Planner />}
-      {route.page === 'operations' && <DataOperations />}
+      {route.page === 'replay' && <Replay anomalyId={route.param} />}
+      {route.page === 'operations' && <DataOperations chaos={<ChaosPanel />} />}
       {route.page === 'lab' && <ScenarioLab />}
       </Suspense>
       </ErrorBoundary>

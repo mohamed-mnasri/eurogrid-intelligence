@@ -190,3 +190,33 @@ class WeatherModelProvider:
                          "raw_sha256": result.raw_sha256, "attribution": "Open-Meteo.com (CC BY 4.0)"}
         modelled = pv_from_weather(rows, location, system)
         return {hour: value for hour, value in modelled.items() if hour.year == year}
+
+    def per_kwp_window(self, location: Location, system: PVSystem, start_utc: datetime,
+                       end_utc: datetime) -> dict[datetime, float]:
+        """PV per kWp for hour starts in [start_utc, end_utc), from actual weather for just those days.
+
+        Used by the event replay: a whole-year request would fail for the current year, and only the event
+        days are needed. End-of-hour stamps are handled by requesting one extra day on each side.
+        """
+        start = (start_utc - timedelta(days=1)).date().isoformat()
+        end = (end_utc + timedelta(days=1)).date().isoformat()
+        variables = ("temperature_2m", "shortwave_radiation")
+        params = {"latitude": location.latitude, "longitude": location.longitude, "start_date": start,
+                  "end_date": end, "hourly": ",".join(variables), "timezone": "UTC"}
+        identity = {"provider": "open-meteo", "dataset": "historical_weather", "endpoint": "/v1/archive",
+                    "request_parameters": params}
+
+        def fetch():
+            with self.client_factory() as client:
+                return OpenMeteoConnector(client).historical(location.latitude, location.longitude, start, end, variables)
+
+        result = self.store.ingest(fetch, identity=identity)
+        hourly = json.loads(result.path.read_text(encoding="utf-8"))["payload"]["hourly"]
+        rows = [(datetime.fromisoformat(stamp).replace(tzinfo=UTC), float(ghi), float(temp))
+                for stamp, temp, ghi in zip(hourly["time"], hourly["temperature_2m"], hourly["shortwave_radiation"])
+                if temp is not None and ghi is not None]
+        self.metadata = {"source": "Open-Meteo archive + EuroGrid PV model (NOAA sun position, Erbs, isotropic sky, NOCT)",
+                         "raw_sha256": result.raw_sha256, "attribution": "Open-Meteo.com (CC BY 4.0)",
+                         "window": f"{start} to {end}"}
+        modelled = pv_from_weather(rows, location, system)
+        return {hour: value for hour, value in modelled.items() if start_utc <= hour < end_utc}

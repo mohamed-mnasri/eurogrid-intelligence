@@ -190,6 +190,19 @@ class CaseStore:
         return json.loads(row[0]) if row else None
 
 
+def partial_domain_notes(domains: dict[str, dict[str, Any]]) -> list[str]:
+    """Name every domain that is only partly available, so a limited report says exactly what is missing."""
+    notes = []
+    for name in ("price", "generation", "load", "cross_border_flows", "weather"):
+        info = domains.get(name) or {}
+        if info.get("status") == "partial":
+            ratio = info.get("completeness_ratio")
+            share = f" ({ratio * 100:.0f}% of hours valid)" if ratio is not None else ""
+            notes.append(f"{name.replace('_', ' ').capitalize()} data is only partial for the event window{share}; "
+                         "findings that use it are limited.")
+    return notes
+
+
 def material_change(tool_name: str, summary: dict[str, Any], spike: bool) -> bool:
     """Does this evidence show a change large enough (by the written RULES) to be called "coinciding"?
 
@@ -281,6 +294,7 @@ def investigate(event: dict[str, Any], tools: InvestigationTools) -> Investigati
         "Generation and load are Energy-Charts public-power series, not a complete system balance.",
     ]
 
+    missing.extend(partial_domain_notes(domains))
     if domains["price"]["status"] == "missing":
         report_status: Literal["complete", "limited", "blocked"] = "blocked"
         missing.append("Price data for the event window is missing, so the anomaly cannot be verified.")

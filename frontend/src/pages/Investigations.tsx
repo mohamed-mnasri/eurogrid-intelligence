@@ -111,6 +111,7 @@ function CaseDetail({ anomalyId }: { anomalyId: string }) {
       <button className="button" disabled={!!running} onClick={() => run('rule-based')}>{running === 'rule-based' ? 'Running…' : 'Run rule-based investigation'}</button>
       <span className="run-agent"><button className="button primary" disabled={!!running} onClick={() => run('agent')}>{running === 'agent' ? 'Agent investigating…' : 'Run AI agent'}</button>
         <input aria-label="Local model" value={model} onChange={(item) => setModel(item.target.value)} /></span>
+      <button className="button" onClick={() => navigate('replay', anomalyId)}>Replay for a household →</button>
       <small>Rule-based: instant, fixed tool sequence. AI agent: a local Ollama model chooses the tools and drafts findings; code checks every statement. Usually 30–60 s.</small>
     </div>
     {running === 'agent' && <Loading label="The local model is choosing tools and drafting findings. Each step is checked by code…" />}

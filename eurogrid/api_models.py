@@ -201,3 +201,19 @@ class SimulationHourPage(BaseModel):
     next_offset: int | None
     unit: str
     items: list[dict[str, Any]]
+
+
+class ReplayRequest(BaseModel):
+    """Replay one saved anomaly against one stored household simulation."""
+
+    anomaly_id: str = Field(pattern=r"^anm_[0-9a-f]{16}$")
+    simulation_id: str = Field(pattern=r"^sim_[0-9a-f]{16}$")
+
+
+class ChaosRequest(BaseModel):
+    """Inject one test-only fault into a copy of the data around a saved anomaly."""
+
+    fault: Literal["missing_feed", "malformed_feed"]
+    anomaly_id: str = Field(pattern=r"^anm_[0-9a-f]{16}$")
+    include_agent: bool = Field(default=False, description="Also run the Phase 9 agent on the faulty copy (needs Ollama)")
+    model: str = Field(default="qwen3.5:4b", pattern=r"^[a-zA-Z0-9._:-]{1,64}$")

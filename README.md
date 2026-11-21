@@ -92,6 +92,10 @@ A LangGraph investigation agent using a local Ollama model, with typed tools, a 
 
 The six-page React app (Market Overview, Market Analytics, AI Investigations, Renewable Planner, Data Operations, Scenario Lab), its endpoints and the synthetic evaluation suite are described in the [Phase 10 guide](docs/phase10.md).
 
+## Phase 11 event replay and chaos mode
+
+Replaying a market event against a simulated household (the event-to-household report) and test-only failure injection with real dbt runs are described in the [Phase 11 guide](docs/phase11.md).
+
 ## Data and security rules
 
 - Treat source terms and returned licence metadata as authoritative for each dataset.

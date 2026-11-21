@@ -10,6 +10,8 @@ lives in the services:
 * ``SimulationService``  – household PV/battery simulations
 * ``OperationsService``  – connector runs, dbt tests, freshness, lineage, source register
 * ``evaluation``         – Scenario Lab synthetic evaluation suite
+* ``ReplayService``      – Grid-to-Home event replay (Phase 11)
+* ``chaos``              – test-only failure injection on copies of the data (Phase 11)
 
 Interactive documentation: http://127.0.0.1:8000/docs (Swagger UI) and /redoc.
 The browser never reads DuckDB directly.
@@ -26,9 +28,11 @@ from fastapi import Body, FastAPI, HTTPException, Path as PathParam, Query, Requ
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 
-from eurogrid.anomaly_service import MAX_PAGE_SIZE, AnomalyService
+from eurogrid.anomaly_service import MAX_PAGE_SIZE, AnomalyService, default_llm_factory
+from eurogrid.chaos import FAULTS, ChaosStore, DbtRunner, run_chaos, run_dbt
 from eurogrid.evaluation import EvaluationStore, run_suite
-from eurogrid.api_models import (AnomalyEventModel, AnomalyPage, ApprovedZone, CoverageResponse, DetectRequest,
+from eurogrid.api_models import (AnomalyEventModel, AnomalyPage, ApprovedZone, ChaosRequest, CoverageResponse,
+                                 DetectRequest, ReplayRequest,
                                  DetectResponse, ErrorResponse, Health, InvestigationRequest, MarketSeriesResponse,
                                  SimulationHourPage, SimulationPage, SimulationRecord, SimulationResponse, ToolInfo,
                                  ToolRequest)
@@ -38,12 +42,14 @@ from eurogrid.investigation_tools import APPROVED_TOOLS, Evidence, Investigation
 from eurogrid.llm import LLM
 from eurogrid.market_service import MarketDataError, MarketService
 from eurogrid.operations_service import OperationsService
+from eurogrid.replay import WindowPVProvider
+from eurogrid.replay_service import ReplayService
 from eurogrid.service_errors import ServiceError
 from eurogrid.simulation import PVProvider
 from eurogrid.simulation_models import HouseholdScenario, SystemConfig, default_systems
 from eurogrid.simulation_service import MAX_HOURLY_PAGE, SimulationService, default_provider_factory
 
-API_VERSION = "0.10.0"
+API_VERSION = "0.11.0"
 EUROSTAT_GEOS = {"EU27_2020", "DE", "FR", "ES", "PL", "NL", "UK"}
 ERRORS = {404: {"model": ErrorResponse}, 422: {"model": ErrorResponse}, 503: {"model": ErrorResponse}}
 TAGS = [
@@ -56,12 +62,16 @@ TAGS = [
     {"name": "analytics", "description": "Cross-country price comparison and seasonal price profiles."},
     {"name": "operations", "description": "Connector runs, dbt test results, freshness, lineage and source licences."},
     {"name": "evaluation", "description": "Scenario Lab: synthetic cases with known injected conditions."},
+    {"name": "replay", "description": "Grid-to-Home: replay a market event against a stored household simulation."},
+    {"name": "chaos", "description": "Test-only failure injection on a copy of the data; production is never modified."},
 ]
 
 
 def create_app(database_path: Path | None = None, data_dir: Path | None = None,
                pv_provider_factory: Callable[[str], PVProvider] | None = None,
-               llm_factory: Callable[[str], LLM] | None = None, dbt_dir: Path | None = None) -> FastAPI:
+               llm_factory: Callable[[str], LLM] | None = None, dbt_dir: Path | None = None,
+               window_pv_factory: Callable[[], WindowPVProvider] | None = None,
+               dbt_runner: DbtRunner | None = run_dbt) -> FastAPI:
     """Create the API app. Paths, the PV provider and the LLM are injectable for tests."""
     db_path = database_path or Path(os.environ.get("EUROGRID_DB_PATH", "data/eurogrid.duckdb"))
     data_root = data_dir or Path(os.environ.get("EUROGRID_DATA_DIR", "data"))
@@ -81,6 +91,12 @@ def create_app(database_path: Path | None = None, data_dir: Path | None = None,
 
     def evaluations() -> EvaluationStore:
         return EvaluationStore(data_root / "metadata" / "evaluations.sqlite")
+
+    def replays() -> ReplayService:
+        return ReplayService(db_path, data_root, simulations(), window_pv_factory)
+
+    def chaos_store() -> ChaosStore:
+        return ChaosStore(data_root / "metadata" / "chaos.sqlite")
 
     def simulations() -> SimulationService:
         return SimulationService(db_path, data_root / "metadata" / "simulations.sqlite",
@@ -366,6 +382,69 @@ def create_app(database_path: Path | None = None, data_dir: Path | None = None,
         payload = run_suite("rule-based")
         evaluations().save(payload)
         return payload
+
+    # ------------------------------------------------------------- replay
+    @app.post("/api/replays", responses=ERRORS, tags=["replay"])
+    def create_replay(request: ReplayRequest) -> dict[str, Any]:
+        """Replay a saved anomaly's local day(s) against a stored household simulation: actual prices and weather,
+        each configuration under the household's tariff and an illustrative dynamic tariff, versus usual prices."""
+        return replays().run(request.anomaly_id, request.simulation_id)
+
+    @app.get("/api/replays", tags=["replay"])
+    def list_replays(limit: int = Query(default=50, ge=1, le=200)) -> list[dict[str, Any]]:
+        return replays().list(limit)
+
+    @app.get("/api/replays/{replay_id}", responses=ERRORS, tags=["replay"])
+    def get_replay(replay_id: str = PathParam(pattern=r"^rpl_[0-9a-f]{16}$")) -> dict[str, Any]:
+        return replays().get(replay_id)
+
+    @app.get("/api/replays/{replay_id}/export", responses=ERRORS, tags=["replay"])
+    def export_replay(replay_id: str = PathParam(pattern=r"^rpl_[0-9a-f]{16}$"),
+                      format: Literal["markdown", "json"] = Query(default="markdown")) -> Any:
+        """The event-to-household report as Markdown, or the full result as JSON."""
+        service = replays()
+        if format == "json":
+            return JSONResponse(service.get(replay_id),
+                                headers={"Content-Disposition": f'attachment; filename="{replay_id}.json"'})
+        return PlainTextResponse(service.markdown(replay_id), media_type="text/markdown; charset=utf-8",
+                                 headers={"Content-Disposition": f'attachment; filename="{replay_id}.md"'})
+
+    # -------------------------------------------------------------- chaos
+    @app.get("/api/chaos/faults", tags=["chaos"])
+    def chaos_faults() -> dict[str, dict[str, str]]:
+        """The faults chaos mode can inject."""
+        return FAULTS
+
+    @app.post("/api/chaos/runs", responses=ERRORS, tags=["chaos"])
+    def create_chaos_run(request: ChaosRequest) -> dict[str, Any]:
+        """Copy a slice of the data around an anomaly, inject the fault into the copy, re-run dbt build/tests, the
+        quality gate and the investigation, and compare with a clean copy. Takes ~30 s (more with the agent)."""
+        event = anomalies().get(request.anomaly_id)
+        agent = None
+        if request.include_agent:
+            from eurogrid.agent import run_investigation
+
+            llm = (llm_factory or default_llm_factory)(request.model)
+
+            def agent(event_dict, tools, store, out_dir):
+                return run_investigation(event_dict["anomaly_id"], tools, store, llm, out_dir)["report"]
+        try:
+            result = run_chaos(request.fault, event, db_path, data_root / "chaos", dbt_runner, agent)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        chaos_store().save(result)
+        return result
+
+    @app.get("/api/chaos/runs", tags=["chaos"])
+    def list_chaos_runs(limit: int = Query(default=20, ge=1, le=100)) -> list[dict[str, Any]]:
+        return chaos_store().list(limit)
+
+    @app.get("/api/chaos/runs/{run_id}", responses=ERRORS, tags=["chaos"])
+    def get_chaos_run(run_id: str = PathParam(pattern=r"^chs_[0-9a-f]{16}$")) -> dict[str, Any]:
+        result = chaos_store().get(run_id)
+        if result is None:
+            raise HTTPException(status_code=404, detail=f"Unknown chaos run {run_id}")
+        return result
 
     return app
 

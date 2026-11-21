@@ -129,3 +129,52 @@ def delete_event_prices(path: Path, zone: str = "DE-LU") -> None:
         db.execute(f"""DELETE FROM gold_market_price WHERE bidding_zone=?
             AND interval_start_utc >= TIMESTAMPTZ '{EVENT_START}' AND interval_start_utc < TIMESTAMPTZ '{EVENT_END}'""",
                    [zone])
+
+
+def build_synthetic_sources(path: Path, conditions: Conditions = Conditions()) -> Path:
+    """The same synthetic data as *source* tables (dim_geography, fct_*), for the real dbt project to build.
+
+    Used by chaos-mode tests, CI (dbt build + tests without API credentials) and the offline demo. Every
+    row carries ``provider='synthetic'`` so it can never be mistaken for real market data.
+    """
+    build_synthetic_database(path, conditions)
+    with duckdb.connect(str(path)) as db:
+        db.execute("SET TimeZone='UTC'")
+        db.execute("""CREATE TABLE dim_geography AS SELECT * FROM (VALUES
+            ('geo-de', 'country', 'de', 'Germany (synthetic)', 'de', NULL, NULL, NULL, 'synthetic'),
+            ('geo-fr', 'country', 'fr', 'France (synthetic)', 'fr', NULL, NULL, NULL, 'synthetic'),
+            ('zone-de-lu', 'bidding_zone', 'DE-LU', 'Germany-Luxembourg (synthetic)', 'de', 'DE-LU', NULL, NULL, 'synthetic'),
+            ('zone-fr', 'bidding_zone', 'FR', 'France (synthetic)', 'fr', 'FR', NULL, NULL, 'synthetic'),
+            ('wx-de', 'coordinate', '52.52,13.405', 'Berlin (synthetic)', 'de', NULL, 52.52, 13.405, 'synthetic'),
+            ('wx-fr', 'coordinate', '48.857,2.352', 'Paris (synthetic)', 'fr', NULL, 48.857, 2.352, 'synthetic')
+            ) g(geography_id, geography_type, code, name, country_code, bidding_zone, latitude, longitude, source)""")
+        db.execute("""CREATE TABLE fct_market_price AS SELECT fact_key,
+            CASE bidding_zone WHEN 'DE-LU' THEN 'zone-de-lu' ELSE 'zone-fr' END AS geography_id,
+            interval_start_utc, interval_end_utc, interval_minutes, original_timestamp, source_timezone,
+            price_eur_per_mwh AS original_value, 'EUR/MWh' AS original_unit, price_eur_per_mwh AS value,
+            'EUR/MWh' AS unit, data_status, 'synthetic' AS provider, dataset, raw_sha256, 'synthetic-price' AS series_id
+            FROM gold_market_price""")
+        db.execute("""CREATE TABLE fct_generation AS
+            SELECT fact_key, 'geo-' || country_code AS geography_id, interval_start_utc, interval_end_utc, interval_minutes,
+                   original_timestamp, source_timezone, production_type, generation_mw AS original_value, 'MW' AS original_unit,
+                   generation_mw AS value, 'MW' AS unit, data_status, 'synthetic' AS provider, dataset, raw_sha256
+            FROM gold_generation_mix
+            UNION ALL
+            SELECT fact_key, 'geo-' || country_code, interval_start_utc, interval_end_utc, interval_minutes,
+                   original_timestamp, source_timezone, 'load', demand_mw, 'MW', demand_mw, 'MW', data_status,
+                   'synthetic', dataset, raw_sha256
+            FROM gold_demand
+            UNION ALL
+            SELECT fact_key, 'geo-' || country_code, interval_start_utc, interval_end_utc, interval_minutes,
+                   original_timestamp, source_timezone, 'cross_border_electricity_trading', net_cross_border_trading_mw, 'MW',
+                   net_cross_border_trading_mw, 'MW', data_status, 'synthetic', dataset, raw_sha256
+            FROM gold_cross_border_flow""")
+        db.execute("""CREATE TABLE fct_weather AS SELECT fact_key, 'wx-' || country_code AS geography_id,
+            interval_start_utc, interval_end_utc, interval_minutes, original_timestamp, source_timezone, variable,
+            weather_value AS original_value, weather_unit AS original_unit, weather_value AS value, weather_unit AS unit,
+            data_status, 'synthetic' AS provider, dataset, raw_sha256
+            FROM gold_weather""")
+        for table in ("gold_market_price", "gold_price_hourly_baseline", "gold_market_coverage", "gold_generation_mix",
+                      "gold_demand", "gold_cross_border_flow", "gold_weather"):
+            db.execute(f"DROP TABLE {table}")
+    return path

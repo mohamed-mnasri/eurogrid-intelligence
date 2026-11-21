@@ -33,7 +33,7 @@ from pydantic import BaseModel, Field
 
 from eurogrid.agent_tools import TOOL_DESCRIPTIONS, PolicyViolation, ToolCallRequest, ToolPolicy, execute_tool
 from eurogrid.investigation import (RULES, CaseStore, Finding, InvestigationReport, ToolCall, material_change,
-                                   render_markdown)
+                                   partial_domain_notes, render_markdown)
 from eurogrid.investigation_tools import Evidence, InvestigationTools
 from eurogrid.llm import LLM, LLMError, OllamaLLM
 
@@ -108,7 +108,7 @@ def build_graph(tools: InvestigationTools, store: CaseStore, llm: LLM, max_tool_
         result = tools.get_data_quality_status(state["geography"], window.window_start, window.window_end)
         domains = result.summary["domains"]
         missing = [f"{name} data is {info['status']} for the event window"
-                   for name, info in domains.items() if info["status"] in UNUSABLE]
+                   for name, info in domains.items() if info["status"] in UNUSABLE] + partial_domain_notes(domains)
         trace = [{"step": 1, "tool_name": result.tool_name, "parameters": result.evidence.parameters,
                   "status": result.status, "evidence_id": result.evidence.evidence_id, "chosen_by": "code"}]
         return {"quality": result.summary, "available_evidence": [result.evidence.model_dump()],
