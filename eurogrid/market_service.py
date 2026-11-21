@@ -238,6 +238,37 @@ class MarketService:
             "source_trace": source_trace,
         }
 
+    SERIES_MEASURES = {
+        "price": ("prices", "gold_market_price", "EUR/MWh"),
+        "generation": ("generation", "gold_generation_mix", "MW"),
+        "load": ("demand", "gold_demand", "MW"),
+        "cross_border_flows": ("cross_border_flows", "gold_cross_border_flow", "MW"),
+        "weather": ("weather", "gold_weather", "per variable (see weather_unit)"),
+    }
+    MAX_SERIES_PAGE = 2000
+
+    def series(self, bidding_zone: str, measure: str, start_date: date, end_date: date,
+               limit: int = 500, offset: int = 0) -> dict[str, Any]:
+        """One measure for a zone and bounded date window, returned a page at a time."""
+        if measure not in self.SERIES_MEASURES:
+            raise ValueError(f"measure must be one of {sorted(self.SERIES_MEASURES)}")
+        if not 1 <= limit <= self.MAX_SERIES_PAGE:
+            raise ValueError(f"limit must be between 1 and {self.MAX_SERIES_PAGE}")
+        if offset < 0:
+            raise ValueError("offset cannot be negative")
+        key, model, unit = self.SERIES_MEASURES[measure]
+        payload = self.overview(bidding_zone, start_date, end_date)
+        rows = payload[key]
+        page = rows[offset:offset + limit]
+        lineage_key = {"price": "prices", "load": "demand"}.get(measure, measure)
+        return {
+            "bidding_zone": bidding_zone, "measure": measure, "unit": unit, "model": model,
+            "window": payload["window"], "total": len(rows), "offset": offset, "limit": limit,
+            "next_offset": offset + limit if offset + limit < len(rows) else None,
+            "items": page, "lineage": payload["lineage"].get(lineage_key, ""),
+            "source_trace": [item for item in payload["source_trace"] if item["measure"] == key],
+        }
+
     def price_history(self, bidding_zone: str, year: int) -> dict[str, Any]:
         """Summarize valid hourly wholesale prices by month for a selected year."""
         markets = {row["bidding_zone"]: row for row in self.coverage()}

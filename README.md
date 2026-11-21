@@ -80,6 +80,10 @@ Robust comparable-hour price anomaly detection, approved read-only investigation
 
 Hourly household PV and battery simulation (PVGIS or a documented weather model), fixed and dynamic tariffs, payback, NPV and sensitivity analysis are described in the [Phase 7 guide](docs/phase7.md).
 
+## Phase 8 API service layer
+
+The FastAPI endpoints for coverage, market series, anomalies, investigations, evidence, approved tools and simulations, with their limits and Swagger UI, are described in the [Phase 8 guide](docs/phase8.md).
+
 ## Data and security rules
 
 - Treat source terms and returned licence metadata as authoritative for each dataset.
