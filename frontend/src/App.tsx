@@ -36,6 +36,7 @@ export default function App() {
   const [route, setRoute] = useState(currentHash)
   const [lastDate, setLastDate] = useState<string | null>(null)
   const [apiDown, setApiDown] = useState(false)
+  const [dataset, setDataset] = useState('')
 
   useEffect(() => {
     const onChange = () => setRoute(currentHash())
@@ -49,6 +50,7 @@ export default function App() {
     getJson<{ markets: { last_source_date: string | null }[] }>('/api/coverage')
       .then(({ markets }) => setLastDate(markets.map((item) => item.last_source_date ?? '').sort().at(-1) || null))
       .catch(() => setApiDown(true))
+    getJson<{ dataset?: string }>('/api/health').then((value) => setDataset(value.dataset ?? '')).catch(() => setDataset(''))
   }, [])
 
   const age = daysSince(lastDate)
@@ -64,10 +66,12 @@ export default function App() {
         {apiDown ? <span className="pill pill-failing">API offline</span>
           : lastDate ? <span className={`pill ${age != null && age > 7 ? 'pill-stale' : 'pill-complete'}`} title="Newest market interval in the Gold models">Data to {lastDate}{age != null && age > 7 ? ` · ${age} d old` : ''}</span>
             : <span className="pill">Checking data…</span>}
+        {dataset === 'synthetic' && <span className="pill pill-coinciding" title="The API is serving the synthetic demo dataset">Synthetic demo data</span>}
         <small>Local research tool · not live market data</small>
       </div>
     </aside>
     <div className="content">
+      {dataset === 'synthetic' && <div className="demo-banner" role="note"><b>Synthetic demo data.</b> Invented values for Germany and France (Feb–Mar 2026) with a known injected price spike on 5 March, built by <code>python -m eurogrid.demo</code>. Not real market data.</div>}
       <ErrorBoundary resetKey={route.page}>
       <Suspense fallback={<main className="dashboard"><Loading label="Opening page…" /></main>}>
       {route.page === 'overview' && <MarketOverview />}

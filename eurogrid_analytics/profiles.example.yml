@@ -1,0 +1,13 @@
+# Copy to eurogrid_analytics/profiles.yml (gitignored) and run dbt with --profiles-dir eurogrid_analytics.
+# Paths are relative to the folder you run dbt from (the repository root). DuckDB needs no credentials.
+eurogrid_analytics:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: data/eurogrid.duckdb
+      threads: 1
+    demo:
+      type: duckdb
+      path: data/demo/eurogrid_demo.duckdb
+      threads: 1

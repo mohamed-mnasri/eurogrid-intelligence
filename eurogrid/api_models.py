@@ -42,6 +42,7 @@ class CoverageResponse(BaseModel):
 class Health(BaseModel):
     status: Literal["ok"]
     version: str
+    dataset: Literal["local", "synthetic", "unavailable"] = "local"
 
 
 class MarketSeriesResponse(BaseModel):

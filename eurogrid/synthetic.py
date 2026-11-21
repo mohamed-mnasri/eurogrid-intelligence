@@ -131,11 +131,14 @@ def delete_event_prices(path: Path, zone: str = "DE-LU") -> None:
                    [zone])
 
 
-def build_synthetic_sources(path: Path, conditions: Conditions = Conditions()) -> Path:
+def build_synthetic_sources(path: Path, conditions: Conditions = Conditions(), keep_gold: bool = False) -> Path:
     """The same synthetic data as *source* tables (dim_geography, fct_*), for the real dbt project to build.
 
     Used by chaos-mode tests, CI (dbt build + tests without API credentials) and the offline demo. Every
     row carries ``provider='synthetic'`` so it can never be mistaken for real market data.
+
+    ``keep_gold=True`` also keeps ready-made Gold tables (for running the demo without dbt); leave it off when
+    dbt will build the Gold views, because dbt cannot replace a table with a view of the same name.
     """
     build_synthetic_database(path, conditions)
     with duckdb.connect(str(path)) as db:
@@ -174,7 +177,11 @@ def build_synthetic_sources(path: Path, conditions: Conditions = Conditions()) -
             weather_value AS original_value, weather_unit AS original_unit, weather_value AS value, weather_unit AS unit,
             data_status, 'synthetic' AS provider, dataset, raw_sha256
             FROM gold_weather""")
-        for table in ("gold_market_price", "gold_price_hourly_baseline", "gold_market_coverage", "gold_generation_mix",
-                      "gold_demand", "gold_cross_border_flow", "gold_weather"):
-            db.execute(f"DROP TABLE {table}")
+        gold = ("gold_market_price", "gold_market_coverage", "gold_generation_mix", "gold_demand",
+                "gold_cross_border_flow", "gold_weather")
+        for table in (*gold, "gold_price_hourly_baseline"):
+            if keep_gold and table in gold:
+                db.execute(f"UPDATE {table} SET provider = 'synthetic'")
+            elif not keep_gold:
+                db.execute(f"DROP TABLE {table}")
     return path

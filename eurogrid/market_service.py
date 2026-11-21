@@ -325,6 +325,15 @@ class MarketService:
             "source": "Valid day-ahead wholesale observations, averaged first to UTC hours and then by calendar month.",
         }
 
+    def dataset_kind(self) -> str:
+        """'synthetic' when the Gold prices come from the synthetic demo data, otherwise 'local'."""
+        try:
+            with self._connect() as db:
+                providers = {row[0] for row in db.execute("SELECT DISTINCT provider FROM gold_market_price").fetchall()}
+        except (duckdb.Error, MarketDataError):
+            return "unavailable"
+        return "synthetic" if "synthetic" in providers else "local"
+
     def price_comparison(self, year: int) -> dict[str, Any]:
         """Monthly average of valid day-ahead prices for every priced country zone (Market Analytics)."""
         markets = [row for row in self.coverage() if row["has_prices"] and not row["is_aggregate"]]

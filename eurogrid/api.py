@@ -109,8 +109,8 @@ def create_app(database_path: Path | None = None, data_dir: Path | None = None,
     # ------------------------------------------------------------ markets
     @app.get("/api/health", response_model=Health, tags=["markets"])
     def health() -> dict[str, str]:
-        """Confirm the API process is responding without querying market data."""
-        return {"status": "ok", "version": API_VERSION}
+        """Confirm the API is responding, and say whether it serves real local data or the synthetic demo."""
+        return {"status": "ok", "version": API_VERSION, "dataset": MarketService(db_path).dataset_kind()}
 
     @app.get("/api/coverage", response_model=CoverageResponse, responses=ERRORS, tags=["markets"])
     def coverage() -> dict[str, Any]:
