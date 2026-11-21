@@ -114,6 +114,26 @@ class MarketApiTests(unittest.TestCase):
             self.route("/api/overview")("FR", date(2025, 1, 1), date(2025, 2, 1))
         self.assertEqual(too_long.exception.status_code, 422)
 
+    def test_price_history_averages_valid_hours_by_month_and_skips_missing(self):
+        payload = self.route("/api/price-history")("FR", 2025)
+        self.assertEqual(payload["market"]["price_method"], "bidding_zone")
+        self.assertEqual(len(payload["periods"]), 1)
+        january = payload["periods"][0]
+        self.assertEqual(january["month"], "2025-01")
+        # Only the two valid hours count; the missing hour is not treated as zero.
+        self.assertEqual(january["valid_hour_count"], 2)
+        self.assertAlmostEqual(january["wholesale_eur_per_mwh"], 42)
+        self.assertAlmostEqual(january["usual_eur_per_mwh"], 42.5)
+
+    def test_price_history_for_all_europe_uses_country_average_and_empty_years_stay_empty(self):
+        europe = self.route("/api/price-history")("ALL", 2025)
+        self.assertEqual(europe["market"]["price_method"], "market_average")
+        self.assertEqual(europe["periods"][0]["market_names"], ["France"])
+        self.assertEqual(self.route("/api/price-history")("FR", 2024)["periods"], [])
+        with self.assertRaises(HTTPException) as unknown:
+            self.route("/api/price-history")("XX", 2025)
+        self.assertEqual(unknown.exception.status_code, 404)
+
     def test_day_length_accounts_for_dst(self):
         self.assertEqual(MarketService._expected_intervals(date(2025, 3, 30), date(2025, 3, 30), "Europe/Paris"), 23)
         self.assertEqual(MarketService._expected_intervals(date(2025, 10, 26), date(2025, 10, 26), "Europe/Paris"), 25)

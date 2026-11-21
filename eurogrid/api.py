@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from eurogrid.market_service import MarketDataError, MarketService
-from eurogrid.household_service import household_benchmark
+from eurogrid.household_service import household_benchmark, household_price_history
 
 
 def create_app(database_path: Path | None = None) -> FastAPI:
@@ -46,6 +46,20 @@ def create_app(database_path: Path | None = None) -> FastAPI:
         except Exception as exc:
             raise HTTPException(status_code=503, detail=f"Eurostat benchmark data is unavailable: {exc}") from exc
 
+    @app.get("/api/household-price-history")
+    def household_price_series(
+        geo: str = Query(min_length=2, max_length=16),
+        year: int = Query(ge=2007, le=2100),
+    ) -> dict[str, Any]:
+        """Return official H1/H2 household prices without filling missing periods."""
+        allowed = {"EU27_2020", "DE", "FR", "ES", "PL", "NL", "UK"}
+        if geo not in allowed:
+            raise HTTPException(status_code=404, detail="No Eurostat benchmark configured for this geography")
+        try:
+            return household_price_history(geo, year)
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail=f"Eurostat price history is unavailable: {exc}") from exc
+
     @app.get("/api/overview")
     def overview(
         bidding_zone: str = Query(min_length=2, max_length=32),
@@ -59,6 +73,18 @@ def create_app(database_path: Path | None = None) -> FastAPI:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         except MarketDataError as exc:
             status = 404 if str(exc).startswith(("No ingested price coverage", "No ingested data")) else 503
+            raise HTTPException(status_code=status, detail=str(exc)) from exc
+
+    @app.get("/api/price-history")
+    def price_history(
+        bidding_zone: str = Query(min_length=2, max_length=32),
+        year: int = Query(ge=2000, le=2100),
+    ) -> dict[str, Any]:
+        """Return monthly wholesale averages for one zone/year, using observed hours only."""
+        try:
+            return MarketService(db_path).price_history(bidding_zone, year)
+        except MarketDataError as exc:
+            status = 404 if str(exc).startswith("No ingested data") else 503
             raise HTTPException(status_code=status, detail=str(exc)) from exc
 
     return app

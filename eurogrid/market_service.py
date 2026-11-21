@@ -238,6 +238,91 @@ class MarketService:
             "source_trace": source_trace,
         }
 
+    def price_history(self, bidding_zone: str, year: int) -> dict[str, Any]:
+        """Summarize valid hourly wholesale prices by month for a selected year."""
+        markets = {row["bidding_zone"]: row for row in self.coverage()}
+        if bidding_zone not in markets:
+            raise MarketDataError(f"No ingested data for market area {bidding_zone}")
+        market = dict(markets[bidding_zone])
+        country = str(market["country_code"]).lower()
+        price_markets = [row for row in markets.values()
+                         if row["has_prices"] and row["country_code"] not in {"all", "eu"}]
+        is_all_europe = country == "all"
+        market["price_method"] = "market_average" if is_all_europe and price_markets else (
+            "bidding_zone" if market["has_prices"] else "unavailable")
+        try:
+            with self._connect() as db:
+                if market["price_method"] == "market_average":
+                    hours = self._average_market_prices(
+                        db, price_markets, f"{year}-01-01", f"{year}-12-31")
+                    month_field = "utc"
+                elif market["price_method"] == "bidding_zone":
+                    hours = self._country_price_hours(db, bidding_zone, year)
+                    month_field = "local"
+                else:
+                    hours = []
+                    month_field = "utc"
+        except duckdb.Error as exc:
+            raise MarketDataError(f"Gold market-price models are missing or failed to query: {exc}") from exc
+
+        monthly: dict[str, dict[str, Any]] = {}
+        for row in hours:
+            timestamp = row["interval_start_utc"] if month_field == "utc" else row["original_timestamp"]
+            month = str(timestamp)[:7]
+            value = row.get("price_eur_per_mwh")
+            if value is None:
+                continue
+            item = monthly.setdefault(month, {"prices": [], "usual": [], "markets": set()})
+            item["prices"].append(float(value))
+            baseline = row.get("mean_price_eur_per_mwh")
+            if baseline is not None:
+                item["usual"].append(float(baseline))
+            item["markets"].update(row.get("market_names", []))
+        periods = []
+        for month, item in sorted(monthly.items()):
+            periods.append({
+                "month": month,
+                "wholesale_eur_per_mwh": sum(item["prices"]) / len(item["prices"]),
+                "usual_eur_per_mwh": sum(item["usual"]) / len(item["usual"]) if item["usual"] else None,
+                "valid_hour_count": len(item["prices"]),
+                "market_names": sorted(item["markets"]),
+            })
+        return {
+            "market": market,
+            "year": year,
+            "periods": periods,
+            "source": "Valid day-ahead wholesale observations, averaged first to UTC hours and then by calendar month.",
+        }
+
+    @classmethod
+    def _country_price_hours(cls, db, bidding_zone: str, year: int) -> list[dict[str, Any]]:
+        """Read and average a country's valid 15/60-minute prices into UTC hours."""
+        rows = cls._dict_rows(db, """SELECT CAST(price.interval_start_utc AS VARCHAR) AS interval_start_utc,
+            price.original_timestamp, price.price_eur_per_mwh, price.data_status,
+            baseline.mean_price_eur_per_mwh
+            FROM gold_market_price AS price
+            LEFT JOIN gold_price_hourly_baseline AS baseline
+              ON price.geography_id=baseline.geography_id
+             AND extract(hour from timezone('UTC',price.interval_start_utc))=baseline.utc_hour
+            WHERE price.bidding_zone=? AND substr(price.original_timestamp,1,4)=?
+            ORDER BY price.interval_start_utc""", [bidding_zone, str(year)])
+        buckets: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            hour = cls._utc_hour(row["interval_start_utc"])
+            item = buckets.setdefault(hour, {"prices": [], "usual": [], "original_timestamp": row["original_timestamp"]})
+            price = row.get("price_eur_per_mwh")
+            if row.get("data_status") == "valid" and price is not None:
+                item["prices"].append(float(price))
+            usual = row.get("mean_price_eur_per_mwh")
+            if usual is not None:
+                item["usual"].append(float(usual))
+        return [{
+            "interval_start_utc": hour,
+            "original_timestamp": item["original_timestamp"],
+            "price_eur_per_mwh": sum(item["prices"]) / len(item["prices"]),
+            "mean_price_eur_per_mwh": sum(item["usual"]) / len(item["usual"]) if item["usual"] else None,
+        } for hour, item in sorted(buckets.items()) if item["prices"]]
+
     @classmethod
     def _average_market_prices(cls, db, markets: list[dict[str, Any]], start: str, end: str) -> list[dict[str, Any]]:
         """Build one equal-weight hourly average from the displayed country zones."""

@@ -7,7 +7,7 @@ from unittest.mock import patch
 from fastapi import HTTPException
 
 from eurogrid.api import create_app
-from eurogrid.household_service import eurostat_series, household_benchmark
+from eurogrid.household_service import eurostat_series, household_benchmark, household_price_history
 
 
 class EurostatSeriesTests(unittest.TestCase):
@@ -57,6 +57,18 @@ class EurostatSeriesTests(unittest.TestCase):
         self.assertEqual(result["retail_period"], "2026-S1")
         self.assertEqual(result["retail_eur_per_kwh"], 0.36)
         connector_class.return_value.household_prices.assert_called_once()
+
+
+    def test_price_history_returns_only_published_half_years_for_the_year(self):
+        series = ({"period": "2025-S1", "retail_eur_per_kwh": 0.38},
+                  {"period": "2025-S2", "retail_eur_per_kwh": 0.39},
+                  {"period": "2026-S1", "retail_eur_per_kwh": 0.36})
+        with patch("eurogrid.household_service.household_price_series", return_value=series):
+            self.assertEqual([row["period"] for row in household_price_history("DE", 2025)["periods"]],
+                             ["2025-S1", "2025-S2"])
+            # 2026-S2 is not published yet, so it is absent rather than estimated.
+            self.assertEqual(household_price_history("DE", 2026)["periods"],
+                             [{"period": "2026-S1", "retail_eur_per_kwh": 0.36}])
 
 
 class HouseholdBenchmarkRouteTests(unittest.TestCase):

@@ -47,12 +47,8 @@ def eurostat_series(payload: dict[str, Any], fixed_dimensions: dict[str, str], v
 
 
 @lru_cache(maxsize=32)
-def household_benchmark(geography: str) -> dict[str, Any]:
-    """Return the latest official tax-inclusive household electricity price.
-
-    Eurostat updates this household tariff series twice yearly, so the result is
-    cached for the lifetime of the local API process.
-    """
+def household_price_series(geography: str) -> tuple[dict[str, Any], ...]:
+    """Load the official half-yearly household prices once per geography."""
     with HttpJsonClient(timeout_seconds=20, max_retries=1) as client:
         eurostat = EurostatConnector(client)
         price_sample = eurostat.household_prices(
@@ -62,14 +58,34 @@ def household_benchmark(geography: str) -> dict[str, Any]:
                                        {"freq": "S", "siec": "E7000", "nrg_cons": "KWH2500-4999",
                                         "unit": "KWH", "tax": "I_TAX", "currency": "EUR", "geo": geography},
                                        "time")
-    tariff_period = max(tariff_by_period, default=None)
+    return tuple({"period": period, "retail_eur_per_kwh": price}
+                 for period, price in sorted(tariff_by_period.items()))
+
+
+def household_benchmark(geography: str) -> dict[str, Any]:
+    """Return the latest official tax-inclusive household electricity price."""
+    prices = household_price_series(geography)
+    latest = prices[-1] if prices else None
     return {
         "geography": geography,
-        "retail_eur_per_kwh": tariff_by_period.get(tariff_period) if tariff_period else None,
-        "retail_period": tariff_period,
+        "retail_eur_per_kwh": latest["retail_eur_per_kwh"] if latest else None,
+        "retail_period": latest["period"] if latest else None,
         "retail_band": "2,500–4,999 kWh per year",
         "retail_tax_level": "All taxes and levies included",
         "sources": {
             "retail_price": "Eurostat nrg_pc_204, household band 2,500–4,999 kWh/year, all taxes and levies included.",
         },
+    }
+
+
+def household_price_history(geography: str, year: int) -> dict[str, Any]:
+    """Return only the Eurostat H1/H2 retail observations for a selected year."""
+    prefix = f"{year}-S"
+    return {
+        "geography": geography,
+        "year": year,
+        "retail_band": "2,500–4,999 kWh per year",
+        "periods": [row for row in household_price_series(geography)
+                    if row["period"].startswith(prefix)],
+        "source": "Eurostat nrg_pc_204; national household prices are published half-yearly.",
     }
