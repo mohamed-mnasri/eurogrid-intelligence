@@ -1,4 +1,4 @@
-# Exact versions tested on Python 3.12 (Windows 11 and Ubuntu CI). Install with:
+# Exact versions tested on Python 3.12 and 3.13 (Windows 11 and Ubuntu CI). Install with:
 #   python -m pip install -r requirements-lock.txt
 # requirements.txt keeps the compatible ranges; regenerate this file with pip freeze after upgrading.
 annotated-doc==0.0.6

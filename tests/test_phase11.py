@@ -158,6 +158,7 @@ class ChaosTests(unittest.TestCase):
         event = self._event()
         before = self.counts(self.production)
         missing = run_chaos("missing_feed", event, self.production, self.root / "chaos")
+        self.assertTrue(missing["faulty"]["dbt"]["ran"], missing["faulty"]["dbt"].get("reason"))
         self.assertFalse(missing["detected_by_dbt"])                         # schema tests do not see a gap...
         self.assertEqual(missing["faulty"]["assessment"]["quality"]["generation"], "missing")   # ...the gate does
         self.assertEqual(missing["clean"]["assessment"]["quality"]["generation"], "complete")

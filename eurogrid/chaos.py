@@ -28,6 +28,7 @@ import subprocess
 import sys
 from contextlib import closing
 from datetime import datetime, time, timedelta, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
@@ -66,14 +67,27 @@ OUTPUTS_BY_MODEL = {
 DbtRunner = Callable[[Path, Path], dict[str, Any]]
 
 
+@lru_cache(maxsize=8)
+def _has_duckdb_adapter(executable: str) -> bool:
+    """A dbt on the machine may be for another warehouse; only use one that has the DuckDB adapter."""
+    try:
+        completed = subprocess.run([executable, "--version"], capture_output=True, text=True, timeout=60,
+                                   env={**os.environ, "DO_NOT_TRACK": "1"})
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return "duckdb" in (completed.stdout + completed.stderr).lower()
+
+
 def dbt_executable() -> Path | None:
+    """The dbt to use: EUROGRID_DBT_EXECUTABLE, then the project's .venv-dbt, then dbt on PATH.
+
+    Any candidate without the DuckDB adapter is ignored, so a global dbt for another warehouse is never used.
+    """
     configured = os.environ.get("EUROGRID_DBT_EXECUTABLE")
     candidates = [Path(configured)] if configured else [Path(".venv-dbt/Scripts/dbt.exe"), Path(".venv-dbt/bin/dbt")]
-    found = next((path for path in candidates if path.exists()), None)
-    if found is None and not configured:
-        located = shutil.which("dbt")
-        found = Path(located) if located else None
-    return found
+    if not configured and (located := shutil.which("dbt")):
+        candidates.append(Path(located))
+    return next((path for path in candidates if path.exists() and _has_duckdb_adapter(str(path.resolve()))), None)
 
 
 def run_dbt(database: Path, workdir: Path, project_dir: Path = Path("eurogrid_analytics")) -> dict[str, Any]:
