@@ -50,7 +50,7 @@ See [architecture](docs/architecture.md), [data dictionary](docs/data_dictionary
 
 ## Quick start: synthetic demo (no credentials, no data download)
 
-Requires Windows, macOS or Linux with **Python 3.12 or 3.13** (both tested in CI) and **Node.js 24**. The commands below are PowerShell; `py -3` picks your newest Python (use `py -3.13` to choose one). On macOS/Linux use `python3 -m venv .venv` and `.venv/bin/python` instead of `.\.venv\Scripts\python.exe`.
+Requires Windows, macOS or Linux with **Python 3.12, 3.13 or 3.14** (3.12 and 3.13 run in CI; 3.14 verified with a fresh clone) and **Node.js 24**. The commands below are PowerShell; `py -3` picks your newest Python (use `py -3.13` to choose one). On macOS/Linux use `python3 -m venv .venv` and `.venv/bin/python` instead of `.\.venv\Scripts\python.exe`.
 
 ```powershell
 py -3 -m venv .venv
