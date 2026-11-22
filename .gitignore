@@ -29,3 +29,6 @@ Thumbs.db
 
 # Local dbt profile (copy of eurogrid_analytics/profiles.example.yml)
 eurogrid_analytics/profiles.yml
+
+# Convenience copy of docs/PROJECT_TECHNICAL_GUIDE.docx at the project root
+/PROJECT_TECHNICAL_GUIDE.docx

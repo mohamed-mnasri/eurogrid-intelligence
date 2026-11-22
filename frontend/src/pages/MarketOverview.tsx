@@ -3,6 +3,7 @@ import ReactEChartsCore from 'echarts-for-react/esm/core'
 import { echarts, type EChartsOption } from '../lib/charts'
 import { API } from '../lib/api'
 import { StaleNotice } from '../components/States'
+import { PageGuide } from '../components/PageGuide'
 const weatherCities: Record<string, string> = { de: 'Berlin', fr: 'Paris', es: 'Madrid', pl: 'Warsaw', nl: 'Amsterdam', uk: 'London' }
 type Market = { country_code: string; bidding_zone: string; market_name: string; is_aggregate: boolean; has_prices: boolean; price_method?: string; price_market_count?: number; first_source_date: string; last_source_date: string; source_timezone: string; power_timezone?: string }
 type Point = Record<string, string | number | string[] | null>
@@ -368,6 +369,7 @@ export default function MarketOverview() {
 
   return <main className="dashboard">
     <header className="page-header"><div><div className="eyebrow">MARKET OVERVIEW</div><h1>Electricity at a glance</h1><p>Choose a country and month to compare grid electricity, generation, wholesale prices, and household-price references.</p></div><span className="data-source">Energy-Charts · Eurostat</span></header>
+    <PageGuide page="overview" />
     <section className="how-to-read" aria-label="How to read the dashboard"><b>How to read the numbers</b><span><strong>GW</strong> = power at one moment. <strong>MWh</strong> = energy over an hour or another period. <strong>kWh</strong> is the unit on household bills. 1 MWh = 1,000 kWh; 1 TWh = 1 billion kWh.</span><span>On the generation chart, 100% means reported generation matches the selected area's reported public-grid electricity use for the same hour. It compares these two provider reports, not a complete system balance.</span></section>
     <section className="controls"><label>COUNTRY OR ALL EUROPE<select value={zone} onChange={(event) => selectMarket(event.target.value)}>{markets.map((market) => <option key={market.bidding_zone} value={market.bidding_zone}>{market.market_name}</option>)}</select></label><label>YEAR<select value={selectedYear} onChange={(event) => setYear(event.target.value)}>{yearOptions.map((value) => <option key={value}>{value}</option>)}</select></label><label>MONTH<select value={month} onChange={(event) => setMonthAndDay(event.target.value)}>{monthOptions.map((value) => <option key={value} value={value}>{new Date(`${value}-01T00:00:00Z`).toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' })}</option>)}</select></label><span className="coverage-copy">Available data: {firstMonth || '—'} to {lastMonth || '—'}</span>
       {selected?.country_code === 'all' && <p className="coverage-explainer"><strong>What “All Europe” means:</strong> power use and generation use Energy-Charts’ Europe aggregate reports, not a sum of every country chart. The provider dataset does not list every country included in that aggregate, so we cannot confirm it covers every European country. Wholesale prices are an equal-weight average of the country markets with data this month{priceMarketNames.length ? `: ${priceMarketNames.join(', ')}` : ''}. The household price reference is for the EU-27.</p>}

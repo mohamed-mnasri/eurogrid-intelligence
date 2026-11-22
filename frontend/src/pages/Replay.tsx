@@ -62,7 +62,7 @@ export default function ReplayPage({ anomalyId: param }: { anomalyId: string }) 
 
   const event = events.find((item) => item.anomaly_id === anomalyId)
   return <main className="dashboard">
-    <PageHeader eyebrow="GRID-TO-HOME EVENT REPLAY" title="What would this market event have meant for a household?">Pick a detected price event and a household you simulated in the planner. The household's day is replayed hour by hour with the actual prices and weather of that day, then compared with the same hours at usual prices.</PageHeader>
+    <PageHeader guide="replay" eyebrow="GRID-TO-HOME EVENT REPLAY" title="What would this market event have meant for a household?">Pick a detected price event and a household you simulated in the planner. The household's day is replayed hour by hour with the actual prices and weather of that day, then compared with the same hours at usual prices.</PageHeader>
     {loadError && <ErrorState message={loadError} />}
     <section className="form-card">
       <div className="form-grid">

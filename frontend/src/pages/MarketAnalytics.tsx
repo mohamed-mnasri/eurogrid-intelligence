@@ -122,7 +122,7 @@ export default function MarketAnalytics() {
   }
 
   return <main className="dashboard">
-    <PageHeader eyebrow="MARKET ANALYTICS" title="Compare markets, seasons and unusual hours">Historical day-ahead prices across countries, the typical shape of a day in each month, and the price anomalies detected by the transparent median/MAD rule.</PageHeader>
+    <PageHeader guide="analytics" eyebrow="MARKET ANALYTICS" title="Compare markets, seasons and unusual hours">Historical day-ahead prices across countries, the typical shape of a day in each month, and the price anomalies detected by the transparent median/MAD rule.</PageHeader>
     <section className="controls">
       <label>YEAR<select value={year} onChange={(event) => setYear(event.target.value)}>{years.map((value) => <option key={value}>{value}</option>)}</select></label>
       <label>FOCUS MARKET<select value={zone} onChange={(event) => setZone(event.target.value)}>{zones.map((item) => <option key={item.bidding_zone}>{item.bidding_zone}</option>)}</select></label>

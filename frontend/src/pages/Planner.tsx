@@ -67,7 +67,7 @@ export default function Planner() {
 
   const best = result ? pickBest(result.systems, objective, budget) : null
   return <main className="dashboard">
-    <PageHeader eyebrow="RENEWABLE INVESTMENT PLANNER" title="Would solar and a battery pay off?">Hour-by-hour simulation of a household with rooftop solar, optionally a battery, over a full year, then the bill, payback and net present value under your tariff and finance assumptions.</PageHeader>
+    <PageHeader guide="planner" eyebrow="RENEWABLE INVESTMENT PLANNER" title="Would solar and a battery pay off?">Hour-by-hour simulation of a household with rooftop solar, optionally a battery, over a full year, then the bill, payback and net present value under your tariff and finance assumptions.</PageHeader>
     <section className="form-card">
       <div className="form-grid">
         <label>LOCATION<select value={place} onChange={(event) => choosePlace(event.target.value)}>{Object.entries(LOCATIONS).map(([key, value]) => <option key={key} value={key}>{value.label}</option>)}</select></label>

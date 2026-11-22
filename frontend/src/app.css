@@ -19,6 +19,31 @@
 .demo-banner { margin: 14px clamp(18px, 4vw, 58px) 0; padding: 10px 14px; border-radius: 8px; background: #2b2614; border: 1px solid #5b4d27; color: #f0dca4; font-size: 12.5px; line-height: 1.5; }
 .app-footer { padding: 10px clamp(18px, 4vw, 58px) 24px; color: #61756a; font-size: 10px; letter-spacing: .1em; }
 
+/* Page guides ("How to use this page") */
+.page-guide { margin: 0 0 16px; padding: 14px 16px; background: #0f1d18; border: 1px solid #2f5a44; border-radius: 10px; }
+.guide-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.guide-head > div { display: flex; align-items: center; gap: 9px; font-size: 14px; color: #eef6f0; }
+.guide-badge, .guide-toggle span { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: #2a6b47; color: #f2fbf5; font-size: 12px; font-weight: 700; }
+.guide-purpose { margin: 8px 0 12px; color: #d6e2da; font-size: 13.5px; line-height: 1.55; }
+.guide-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 22px; }
+.page-guide h3 { margin: 0 0 6px; font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: #8fe0ad; }
+.page-guide ol { margin: 0 0 14px; padding-left: 20px; display: grid; gap: 5px; font-size: 13px; line-height: 1.5; color: #d6e2da; }
+.page-guide dl { margin: 0 0 12px; display: grid; gap: 7px; }
+.page-guide dl div { font-size: 12.5px; line-height: 1.5; }
+.page-guide dt { display: inline; font-weight: 600; color: #eef6f0; }
+.page-guide dt::after { content: ' — '; color: #6f8478; font-weight: 400; }
+.page-guide dd { display: inline; margin: 0; color: #b8c7bd; }
+.guide-toggle { display: inline-flex; align-items: center; gap: 8px; margin: 0 0 14px; padding: 7px 12px; border-radius: 20px; border: 1px solid #2f5a44; background: #0f1d18; color: #c9e9d4; font-size: 12.5px; cursor: pointer; }
+.guide-toggle:hover { background: #15291f; }
+@media (max-width: 860px) { .guide-grid { grid-template-columns: 1fr; } }
+
+.welcome-wrap:empty { display: none; }
+.welcome-wrap { padding: 18px clamp(18px, 4vw, 58px) 0; }
+.welcome { padding: 14px 16px; background: #13221b; border: 1px solid #3d8a5f; border-radius: 10px; color: #d6e2da; font-size: 13.5px; line-height: 1.55; }
+.welcome p { margin: 8px 0; }
+.welcome ol { margin: 6px 0; padding-left: 20px; display: grid; gap: 3px; }
+.welcome a { color: #8fe0ad; font-weight: 600; }
+
 /* States */
 .state { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; padding: 13px 15px; border-radius: 8px; font-size: 12.5px; line-height: 1.5; }
 .state-loading { color: #aab9ae; background: #0f1916; border: 1px dashed #2a3f35; }

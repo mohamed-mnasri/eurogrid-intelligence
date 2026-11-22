@@ -41,7 +41,7 @@ export default function Investigations({ anomalyId: param }: { anomalyId: string
   }, [zone, direction, offset])
 
   return <main className="dashboard">
-    <PageHeader eyebrow="AI INVESTIGATION CENTRE" title="Investigate price anomalies">Each case records the detected event, every tool called, the evidence behind each statement, what could not be checked, and how the report was produced. No report claims a proven cause.</PageHeader>
+    <PageHeader guide="investigations" eyebrow="AI INVESTIGATION CENTRE" title="Investigate price anomalies">Each case records the detected event, every tool called, the evidence behind each statement, what could not be checked, and how the report was produced. No report claims a proven cause.</PageHeader>
     <div className="split">
       <section className="case-list" aria-label="Detected anomalies">
         <div className="case-filters">

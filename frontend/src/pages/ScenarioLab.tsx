@@ -33,7 +33,7 @@ export default function ScenarioLab() {
 
   const definitions = runs?.[0]?.case_definitions ?? []
   return <main className="dashboard">
-    <PageHeader eyebrow="SCENARIO LAB" title="Does the investigator get known cases right?" aside={<button className="button primary" onClick={runSuite} disabled={running}>{running ? 'Running 7 cases…' : 'Run rule-based suite'}</button>}>
+    <PageHeader guide="lab" eyebrow="SCENARIO LAB" title="Does the investigator get known cases right?" aside={<button className="button primary" onClick={runSuite} disabled={running}>{running ? 'Running 7 cases…' : 'Run rule-based suite'}</button>}>
       Each case builds a separate synthetic database with one known condition injected around a German price spike, then detects, investigates and scores the result. These are synthetic test cases, not real market events, and there is no blended accuracy score: every check is shown as passed or failed.
     </PageHeader>
     {error && <ErrorState message={error} onRetry={() => setReload((value) => value + 1)} />}

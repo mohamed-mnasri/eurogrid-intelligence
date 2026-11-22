@@ -1,193 +1,241 @@
 # EuroGrid Intelligence
 
-**European Grid-to-Home Energy Intelligence Platform.** It ingests public European electricity-market data and finds unusual price hours. It investigates them with evidence, using a deterministic engine or a local AI model whose every statement is checked by code. It also shows what an event would have meant for a household with solar and a battery. It runs locally, on free, keyless public sources.
+[![CI](https://github.com/mohamed-mnasri/eurogrid-intelligence/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/mohamed-mnasri/eurogrid-intelligence/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.12%20%7C%203.13%20%7C%203.14-3776AB)
+![dbt tests](https://img.shields.io/badge/dbt%20tests-42-2f6b4b)
+![Local AI](https://img.shields.io/badge/AI-local%20Ollama-b06a1e)
 
-![AI investigation: activity trace with model telemetry](docs/screenshots/investigation-trace.png)
+**A local data and AI platform for European electricity markets.** It collects public market data with a tested pipeline, explains unusual price hours with evidence (using rules or a local AI model whose every statement is checked by code), and shows what a price event would have meant for a home with solar panels and a battery.
 
-## What it demonstrates (measured, not claimed)
+![EuroGrid: AI investigation with evidence and activity trace](docs/screenshots/investigation-trace.png)
 
-**Data pipeline**
-- **Ingest → normalize → dbt build → detect, in one command.** Loads are incremental: only new raw files, applied in fetch order so a revised interval always keeps its newest version. Every run and stage is recorded.
-- **First run on real data:** 1–21 Nov 2026, 18 requests, 5.2M generation rows loaded, 42/42 dbt tests and source freshness passing.
+## Contents
 
-**Testing the tests**
-- **Chaos mode breaks a copy of the data on purpose.** Missing feed: all 24 schema tests passed, so I wrote a `no_hourly_gaps` test. The same experiment now fails the build (42/42 on the clean copy, the gap test failing on the broken one).
-- **Malformed feed:** two dbt tests fail and lineage lists every affected model.
+- [Why this project](#why-this-project)
+- [Highlights](#highlights)
+- [Screenshots](#screenshots)
+- [Features](#features)
+- [Architecture](#architecture)
+- [Tech stack](#tech-stack)
+- [Getting started](#getting-started)
+- [Usage](#usage)
+- [Testing and CI](#testing-and-ci)
+- [Project structure](#project-structure)
+- [Documentation](#documentation)
+- [Data, licences and security](#data-licences-and-security)
+- [Known limitations](#known-limitations)
+- [Licence](#licence)
 
-**AI agent**
-- **Guarded local agent.** A local 4B model (Ollama) chooses tools from an allowlist and drafts findings. Code checks every statement's evidence, wording and materiality.
-- **Measured on 7 synthetic cases with known causes.**
-  - The first evaluation passed 1/7: the model called unchanged series "relationships".
-  - A deterministic materiality check raised it to **7/7 in each of 3 repeated runs**, with 0 failed model calls.
-  - Cost per investigation: a median of 41 s, 7 model calls, and about 7.7k prompt + 1.4k output tokens. The rule-based engine takes 0.3 s.
+## Why this project
 
-**Grid-to-Home**
-- **Replaying a real German price spike** (14 Sep 2026, peak €697/MWh) against a simulated Berlin household, for that day:
-  - a fixed tariff: +€0.00;
-  - an illustrative dynamic tariff: +€1.49;
-  - with 4 kWp of solar: +€0.96;
-  - with solar and a 5 kWh battery: +€0.04.
+Electricity prices in Europe sometimes jump to many times their usual level. Explaining why is hard: wind, demand, imports and neighbouring markets all change at once, the public data has gaps, and it is easy for a person or an AI to claim a cause the data cannot prove.
 
-| Investigation and evidence | Event replay | Data operations and chaos mode |
+EuroGrid answers the question honestly. It measures what changed, links every statement to stored evidence, says what could not be checked, and connects the event to its cost for a household. It runs entirely on one machine, using free public sources that need no API keys.
+
+## Highlights
+
+These numbers come from runs recorded in the project, not from estimates.
+
+| Area | What was built | Measured result |
 |---|---|---|
-| ![Investigation](docs/screenshots/investigation-trace.png) | ![Replay](docs/screenshots/replay.png) | ![Data operations](docs/screenshots/data-operations.png) |
-| **Scenario Lab** | **Market Analytics** | **Market Overview** |
-| ![Scenario Lab](docs/screenshots/scenario-lab.png) | ![Analytics](docs/screenshots/analytics.png) | ![Overview](docs/screenshots/overview.png) |
+| **Data pipeline** | `python -m eurogrid.pipeline run`: ingest → normalize → dbt build → detect. Incremental: loads only new raw files, newest fetch wins, every stage recorded | First run on real data: 18 requests, 5.2M generation rows, 42/42 dbt tests and source freshness passing |
+| **Testing the tests** | Chaos mode breaks a copy of the data and re-runs the real dbt project | A missing feed passed all 24 schema tests, so a `no_hourly_gaps` test was added; the same fault now fails the build |
+| **AI agent** | A local 4B model (Ollama) picks tools from an allowlist and drafts findings; code checks evidence, wording and materiality | 1/7 synthetic cases at first → **7/7 in each of 3 repeated runs** after a code check; median 41 s and ~9k tokens per investigation (rule-based: 0.3 s) |
+| **Grid-to-Home** | Replays a real event against a simulated household | German spike of 14 Sep 2026: +€0.00 on a fixed tariff, +€1.49 on a dynamic tariff, +€0.04 with solar and a 5 kWh battery |
 
-## Pages
+## Screenshots
 
-| Page | What it does |
+| Event replay | Data operations and chaos mode | Scenario Lab |
+|---|---|---|
+| ![Event replay](docs/screenshots/replay.png) | ![Data operations](docs/screenshots/data-operations.png) | ![Scenario Lab](docs/screenshots/scenario-lab.png) |
+| **Market Overview** | **Market Analytics** | **AI investigation** |
+| ![Market Overview](docs/screenshots/overview.png) | ![Market Analytics](docs/screenshots/analytics.png) | ![AI investigation](docs/screenshots/investigation-trace.png) |
+
+## Features
+
+The web app has seven pages. **Every page has a "How to use this page" guide** that explains, in plain language, what the page is for, the steps to use it and what each section shows. First-time visitors also get a short welcome with a suggested tour.
+
+<details>
+<summary>What a first-time visitor sees</summary>
+
+![Welcome and page guide](docs/screenshots/first-visit-guide.png)
+
+</details>
+
+| Page | What you can do |
 |---|---|
-| Market Overview | Prices, household-price reference, grid use, generation and weather for a country and month |
-| Market Analytics | Country comparison, month × hour price heatmap, detected anomalies |
-| AI Investigations | Cases with evidence-linked findings, activity trace, Markdown/JSON export; rule-based or local LLM agent |
-| Renewable Planner | Hourly PV/battery simulation, bills, payback, NPV, sensitivity, battery dispatch |
-| Event Replay | A market event replayed against a simulated household: tariffs, systems, usual vs actual prices |
-| Data Operations | Connector runs, dbt tests and lineage, coverage gaps, licence register, chaos mode |
-| Scenario Lab | Synthetic cases with known causes, scored check by check |
+| **Market Overview** | See prices, the household-price reference, grid use, generation and weather for a country and month |
+| **Market Analytics** | Compare countries, see the typical price for each hour of each month, and find unusual price hours |
+| **AI Investigations** | Investigate an anomaly with rules or the local AI agent; read evidence-linked findings, the activity trace and model cost; export the report |
+| **Renewable Planner** | Simulate solar and battery systems hour by hour: bills, payback, NPV, sensitivity and battery behaviour |
+| **Event Replay** | See what one real price event would have cost a simulated household, with and without solar and a battery |
+| **Data Operations** | Check pipeline runs, dbt tests, freshness, coverage gaps, lineage and licences; run chaos experiments |
+| **Scenario Lab** | See how both investigators score on test cases with known causes, including repeated runs and history |
 
-See [architecture](docs/architecture.md), [data dictionary](docs/data_dictionary.md), [sources and licences](docs/sources.md) and [known limitations](docs/limitations.md).
+## Architecture
 
-## Quick start: synthetic demo (no credentials, no data download)
+![Architecture](docs/architecture.png)
 
-Requires Windows, macOS or Linux with **Python 3.12, 3.13 or 3.14** (3.12 and 3.13 run in CI; 3.14 verified with a fresh clone) and **Node.js 24**. The commands below are PowerShell; `py -3` picks your newest Python (use `py -3.13` to choose one). On macOS/Linux use `python3 -m venv .venv` and `.venv/bin/python` instead of `.\.venv\Scripts\python.exe`.
+1. **Ingest:** connectors fetch public data and save each response unchanged, with a run ledger.
+2. **Normalize:** responses become typed rows in DuckDB (UTC times, standard units, a quality status per value).
+3. **Model and test:** dbt builds Gold views and runs 42 tests plus source freshness.
+4. **Analyse:** deterministic engines detect anomalies, investigate them and simulate households; the AI agent uses the same read-only tools under code-enforced rules.
+5. **Serve:** FastAPI exposes 44 endpoints, and the React app calls only the API.
+
+Details: [architecture](docs/architecture.md) and the [agent workflow](docs/agent-workflow.png).
+
+## Tech stack
+
+| Layer | Technology |
+|---|---|
+| Ingestion | Python, HTTPX (timeouts, retries), content-addressed raw files, SQLite run ledger |
+| Storage and modelling | DuckDB, dbt-core 1.12 with dbt-duckdb (staging and Gold models, 42 tests, source freshness) |
+| Validation | Pydantic 2 for every model, request and tool result |
+| AI | LangGraph workflow, Ollama with `qwen3.5:4b` (local), JSON-schema-constrained replies |
+| API | FastAPI and Uvicorn, OpenAPI docs at `/docs` |
+| Frontend | React 19, TypeScript, Vite, ECharts |
+| Quality | unittest (119 tests), Vitest, oxlint, GitHub Actions on Python 3.12 and 3.13 |
+
+## Getting started
+
+### Prerequisites
+
+- Python 3.12, 3.13 or 3.14, Node.js 24 and Git.
+- No API keys. Optional: [Ollama](https://ollama.com/download) for the AI agent.
+
+The commands below are for PowerShell on Windows. On macOS or Linux, use `python3 -m venv` and `.venv/bin/python` instead of `.\.venv\Scripts\python.exe`.
+
+### 1. Install
 
 ```powershell
 py -3 -m venv .venv
-```
-
-```powershell
 .\.venv\Scripts\python.exe -m pip install -r requirements-lock.txt
-```
-
-Optional, so the demo is built by the real dbt project; without it the demo writes ready-made tables:
-
-```powershell
 py -3 -m venv .venv-dbt
-```
-
-```powershell
 .\.venv-dbt\Scripts\python.exe -m pip install -r requirements-dbt.txt
-```
-
-Build the demo. It writes `data/demo/` and prints the next commands:
-
-```powershell
-.\.venv\Scripts\python.exe -m eurogrid.demo
-```
-
-Start the API on the demo data:
-
-```powershell
-$env:EUROGRID_DB_PATH="data/demo/eurogrid_demo.duckdb"; $env:EUROGRID_DATA_DIR="data/demo"; $env:EUROGRID_DBT_DIR="data/demo/dbt"; .\.venv\Scripts\python.exe -m uvicorn eurogrid.api:app --host 127.0.0.1 --port 8000
-```
-
-In a second terminal, install and start the frontend, then open http://localhost:5173:
-
-```powershell
 npm --prefix frontend ci
 ```
 
+dbt lives in its own environment (`.venv-dbt`) because it pins its own dependencies. It is optional for the demo but needed for the real-data pipeline and chaos mode.
+
+### 2. Try the synthetic demo (no data download)
+
 ```powershell
-npm --prefix frontend run dev
+.\.venv\Scripts\python.exe -m eurogrid.demo
+$env:EUROGRID_DB_PATH="data/demo/eurogrid_demo.duckdb"; $env:EUROGRID_DATA_DIR="data/demo"; $env:EUROGRID_DBT_DIR="data/demo/dbt"
+.\.venv\Scripts\python.exe -m uvicorn eurogrid.api:app --host 127.0.0.1 --port 8000
 ```
 
-The app shows a **Synthetic demo data** banner. The demo contains invented data for Germany and France (Feb–Mar 2026) with a known injected price spike on 5 March. The Planner and Event Replay also call PVGIS, Open-Meteo and Eurostat (free, no key).
+In a second terminal run `npm --prefix frontend run dev` and open http://localhost:5173. The demo contains invented data for Germany and France (Feb–Mar 2026) with a known price spike on 5 March, and the app labels it **Synthetic demo data**.
 
-**Optional AI agent:** install [Ollama](https://ollama.com/download), then run:
+### 3. Optional: the local AI agent
 
 ```powershell
 ollama pull qwen3.5:4b
 ```
 
-Use **Run AI agent** on a case. Without Ollama, the API returns a clear 503 and everything else keeps working.
+Then press **Run AI agent** on a case. If Ollama is not running, the API returns a clear 503 and everything else keeps working.
 
-## Full setup with real data
-
-1. Create both environments as above.
-2. Run the pipeline. It ingests (respecting Energy-Charts' rate limit), normalizes, runs `dbt build` and `dbt source freshness`, and detects anomalies. Every run and stage is recorded and shown on **Data Operations**. A backfill is limited to 366 days per run, so backfill a longer history in yearly chunks:
+### 4. Use real data
 
 ```powershell
 .\.venv\Scripts\python.exe -m eurogrid.pipeline run --start 2025-01-01 --end 2025-12-31
-```
-
-```powershell
 .\.venv\Scripts\python.exe -m eurogrid.pipeline run --start 2026-01-01 --end 2026-10-31
+.\.venv\Scripts\python.exe -m uvicorn eurogrid.api:app --reload --host 127.0.0.1 --port 8000
 ```
 
-After that, a plain `run` is incremental: it fetches from the day after the newest stored price up to yesterday, and loads only new raw files.
+- Backfills are limited to 366 days per run, hence the two commands.
+- After that, a plain `pipeline run` is incremental: it fetches from the day after the newest stored price up to yesterday.
+- Stop the API while the pipeline runs, because DuckDB allows one writer at a time.
 
-```powershell
-.\.venv\Scripts\python.exe -m eurogrid.pipeline run
-```
+### Configuration
 
-```powershell
-.\.venv\Scripts\python.exe -m eurogrid.pipeline status
-```
+Every setting has a default; see [`.env.example`](.env.example).
 
-To schedule a daily run on Windows, run this from the repository folder (the task inherits that working directory):
+| Variable | Default | Purpose |
+|---|---|---|
+| `EUROGRID_DB_PATH` | `data/eurogrid.duckdb` | DuckDB file |
+| `EUROGRID_DATA_DIR` | `data` | Raw files, cache and metadata stores |
+| `EUROGRID_DBT_DIR` | `eurogrid_analytics` | dbt project whose results Data Operations shows |
+| `EUROGRID_DBT_EXECUTABLE` | `.venv-dbt`, then `dbt` on PATH | A dbt with the DuckDB adapter |
+| `EUROGRID_LOG_LEVEL` | `INFO` | Logging level |
+
+## Usage
+
+**In the app:** start on Market Overview, then follow the welcome tour: Analytics → Investigations → Planner → Event Replay. Each page's guide explains its sections.
+
+**From the command line:**
+
+| Task | Command |
+|---|---|
+| Refresh data (incremental) | `python -m eurogrid.pipeline run` |
+| Show recent pipeline runs | `python -m eurogrid.pipeline status` |
+| Detect anomalies for a window | `python -m eurogrid.investigate_cli detect --zone DE-LU --start 2026-01-01 --end 2026-10-31` |
+| Run the AI agent on one anomaly | `python -m eurogrid.agent --anomaly-id <anm_id>` |
+| Score the rule-based investigator | `python -m eurogrid.evaluation` |
+| Score the AI agent three times | `python -m eurogrid.evaluation --generator agent --repeats 3` |
+| Run a chaos experiment | `python -m eurogrid.chaos --fault missing_feed --anomaly-id <anm_id>` |
+
+Use `.\.venv\Scripts\python.exe` in place of `python`. API documentation is at http://127.0.0.1:8000/docs.
+
+To schedule a daily refresh on Windows, run this from the repository folder:
 
 ```powershell
 schtasks /Create /SC DAILY /ST 07:00 /TN "EuroGrid pipeline" /TR "cmd /c cd /d \"$PWD\" && .venv\Scripts\python.exe -m eurogrid.pipeline run"
 ```
 
-3. Start the API without the demo variables, then start the frontend. Stop the API while the pipeline runs, because DuckDB allows one writer at a time.
-
-```powershell
-.\.venv\Scripts\python.exe -m uvicorn eurogrid.api:app --reload --host 127.0.0.1 --port 8000
-```
-
-API documentation is at http://127.0.0.1:8000/docs. To run dbt by hand, copy `eurogrid_analytics/profiles.example.yml` to `eurogrid_analytics/profiles.yml` (gitignored, no credentials); see [the dbt project](eurogrid_analytics/README.md).
-
-## Tests and CI
+## Testing and CI
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests
-```
-
-```powershell
 .\.venv\Scripts\python.exe scripts\dbt_synthetic_check.py
-```
-
-```powershell
 npm --prefix frontend test
-```
-
-```powershell
 npm --prefix frontend run lint
-```
-
-```powershell
 npm --prefix frontend run build
 ```
 
-All tests run offline. LLM and PV calls use fakes; chaos tests use synthetic data and the real dbt project when `.venv-dbt` exists. GitHub Actions runs the same checks (see `.github/workflows/ci.yml`).
+- The first command runs 119 Python tests. They are offline: the LLM and PV providers are replaced by fakes, and chaos tests use synthetic data with the real dbt project when `.venv-dbt` exists.
+- The second runs `dbt build` and all 42 tests on synthetic source data.
+- GitHub Actions runs the same checks on every push ([`ci.yml`](.github/workflows/ci.yml)).
 
-## Evaluations and experiments
+## Project structure
 
-Run the Scenario Lab suite with the rule-based investigator:
-
-```powershell
-.\.venv\Scripts\python.exe -m eurogrid.evaluation
+```text
+eurogrid/              Python package
+  connectors.py        Source API connectors (Energy-Charts, Open-Meteo, PVGIS, Eurostat)
+  ingestion.py         Raw store and run ledger
+  normalize.py         Raw files → DuckDB source tables (incremental, newest fetch wins)
+  pipeline.py          ingest → normalize → dbt → detect runner
+  anomaly.py           Robust price-anomaly detection
+  investigation*.py    Approved read-only tools, evidence, rule-based reports
+  agent*.py, llm.py    LangGraph agent and the local-model wrapper
+  simulation*.py, pv.py, replay.py   Household simulation and event replay
+  evaluation.py, synthetic.py, chaos.py, demo.py   Scenario Lab, synthetic data, chaos mode, offline demo
+  api.py, *_service.py FastAPI app and services
+eurogrid_analytics/    dbt project (staging and Gold models, tests)
+frontend/              React app (pages, components, in-app guides)
+tests/                 Python tests
+scripts/               CI dbt check, Ollama check, probes
+docs/                  Guides, diagrams, screenshots, technical guide (.docx)
+data/                  Local data (gitignored)
 ```
 
-Run it with the local AI agent, three times over, to measure how stable it is (a check passes only if it passes in every run). Each run reports latency and token use:
+## Documentation
 
-```powershell
-.\.venv\Scripts\python.exe -m eurogrid.evaluation --generator agent --repeats 3
-```
+| Document | Contents |
+|---|---|
+| [Technical guide (.docx)](docs/PROJECT_TECHNICAL_GUIDE.docx) | Complete developer guide: architecture, data, AI, code, database, setup, troubleshooting |
+| [Architecture](docs/architecture.md) | Components, boundaries and repository layout |
+| [Data dictionary](docs/data_dictionary.md) | Tables, Gold models, stores and identifiers |
+| [Sources and licences](docs/sources.md) | Providers, licence terms and access |
+| [Known limitations](docs/limitations.md) | What the data and models cannot do |
+| [dbt project](eurogrid_analytics/README.md) | Models, tests and how to run dbt by hand |
 
-Run a chaos experiment against a detected anomaly:
-
-```powershell
-.\.venv\Scripts\python.exe -m eurogrid.chaos --fault missing_feed --anomaly-id <anm_id>
-```
-
-## How it was built, phase by phase
+<details>
+<summary>How it was built, phase by phase</summary>
 
 | Phase | Guide |
 |---|---|
-| 0–1 Sources and connectors | [phase1](docs/phase1.md), [sources](docs/sources.md) |
+| 0–1 Sources and connectors | [phase1](docs/phase1.md) |
 | 2 Ingestion, raw store, run ledger | [phase2](docs/phase2.md) |
 | 3 Normalization into DuckDB | [phase3](docs/phase3.md) |
 | 4 dbt models and tests | [phase4](docs/phase4.md) |
@@ -200,10 +248,25 @@ Run a chaos experiment against a detected anomaly:
 | 11 Event replay and chaos mode | [phase11](docs/phase11.md) |
 | 12 CI, pinned dependencies, demo, docs | [phase12](docs/phase12.md) |
 
-## Data and security rules
+</details>
 
-- Each dataset's source terms, and the licence returned with each response, are authoritative. Raw and modelled data under `data/` is never committed.
-- No secrets are needed. If you add an ENTSO-E token later, keep it in `.env` (gitignored); `.env.example` lists names only.
+## Data, licences and security
+
+- Each dataset's own terms, and the licence returned with each response, apply. Raw and modelled data under `data/` is never committed. Day-ahead prices are CC BY 4.0 only for some bidding zones (see [sources](docs/sources.md)).
+- No secrets are needed. If you add an ENTSO-E token later, keep it in `.env`, which is gitignored.
 - Missing data stays missing; it is never silently filled with zero.
-- Wholesale prices are not household tariffs. Simulations, replays and synthetic data are labelled as such.
-- The AI model cannot run SQL, choose geographies or dates, or mark a cause as proven.
+- Simulations, replays and synthetic data are labelled as such. Wholesale prices are not household tariffs.
+- The AI model cannot run SQL, choose countries or dates, or mark a cause as proven.
+
+## Known limitations
+
+- **No outage data:** ENTSO-E is not connected, so reports always say outage evidence could not be checked.
+- **Small evaluation set:** the 7 test cases are synthetic, and the repeated runs use temperature 0, so the results show the guardrails work rather than accuracy on real events.
+- **Simple battery model:** self-consumption only, not price-optimised.
+- **Single-user tool:** one DuckDB writer, and the API has no authentication (it binds to 127.0.0.1).
+
+The full list is in [docs/limitations.md](docs/limitations.md).
+
+## Licence
+
+No licence has been chosen yet, so all rights are reserved by default. Add a `LICENSE` file before others reuse the code.

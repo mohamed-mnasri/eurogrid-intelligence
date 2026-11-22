@@ -1,6 +1,7 @@
 // Loading, empty, error and stale-data states shared by every page (handbook Phase 10, item 7).
 import type { ReactNode } from 'react'
 import { daysSince } from '../lib/api'
+import { PageGuide } from './PageGuide'
 
 export function Loading({ label }: { label: string }) {
   return <div className="state state-loading" role="status"><span className="spinner" aria-hidden="true" />{label}</div>
@@ -26,6 +27,9 @@ export function StaleNotice({ lastDate, what = 'Market data' }: { lastDate: stri
   return <div className="state state-stale"><b>Stale data.</b> {what} ends on {lastDate?.slice(0, 10)} ({age} days ago). Run ingestion and dbt to refresh; nothing here is live.</div>
 }
 
-export function PageHeader({ eyebrow, title, children, aside }: { eyebrow: string; title: string; children?: ReactNode; aside?: ReactNode }) {
-  return <header className="page-header"><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1>{children && <p>{children}</p>}</div>{aside}</header>
+export function PageHeader({ eyebrow, title, children, aside, guide }: { eyebrow: string; title: string; children?: ReactNode; aside?: ReactNode; guide?: string }) {
+  return <>
+    <header className="page-header"><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1>{children && <p>{children}</p>}</div>{aside}</header>
+    {guide && <PageGuide page={guide} />}
+  </>
 }

@@ -3,9 +3,12 @@ import * as echarts from 'echarts/core'
 import { BarChart, HeatmapChart, LineChart, ScatterChart } from 'echarts/charts'
 import { DataZoomComponent, GridComponent, LegendScrollComponent, MarkAreaComponent, MarkLineComponent, TooltipComponent, VisualMapComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
+import { LegacyGridContainLabel } from 'echarts/features'
 import type { EChartsOption } from 'echarts'
 
-echarts.use([LineChart, ScatterChart, BarChart, HeatmapChart, DataZoomComponent, GridComponent, LegendScrollComponent, MarkAreaComponent, MarkLineComponent, TooltipComponent, VisualMapComponent, CanvasRenderer])
+echarts.use([LineChart, ScatterChart, BarChart, HeatmapChart, DataZoomComponent, GridComponent, LegendScrollComponent, MarkAreaComponent, MarkLineComponent, TooltipComponent, VisualMapComponent, CanvasRenderer,
+  // ECharts 6 needs this for grid.containLabel (keeps axis labels inside the chart area).
+  LegacyGridContainLabel])
 
 export { echarts }
 export type { EChartsOption }

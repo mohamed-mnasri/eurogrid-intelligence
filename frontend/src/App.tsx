@@ -6,6 +6,7 @@ import { getJson, daysSince } from './lib/api'
 import { Loading } from './components/States'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { ChaosPanel } from './components/ChaosPanel'
+import { Welcome } from './components/Welcome'
 
 // Each page is its own chunk, loaded when first opened.
 const MarketOverview = lazy(() => import('./pages/MarketOverview'))
@@ -72,6 +73,7 @@ export default function App() {
     </aside>
     <div className="content">
       {dataset === 'synthetic' && <div className="demo-banner" role="note"><b>Synthetic demo data.</b> Invented values for Germany and France (Feb–Mar 2026) with a known injected price spike on 5 March, built by <code>python -m eurogrid.demo</code>. Not real market data.</div>}
+      <div className="welcome-wrap"><Welcome /></div>
       <ErrorBoundary resetKey={route.page}>
       <Suspense fallback={<main className="dashboard"><Loading label="Opening page…" /></main>}>
       {route.page === 'overview' && <MarketOverview />}

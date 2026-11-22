@@ -60,7 +60,7 @@ export default function DataOperations({ chaos }: { chaos?: ReactNode }) {
   const newest = freshness.items.map((item) => item.last_interval_utc).sort().at(-1)
 
   return <main className="dashboard">
-    <PageHeader eyebrow="DATA OPERATIONS" title="Pipeline health and data coverage" aside={<button className="button" onClick={() => setReload((value) => value + 1)}>Refresh</button>}>Connector runs from the ingestion ledger, dbt test results and lineage from dbt's own artifacts, and coverage of every Gold model by country. Everything here is read-only.</PageHeader>
+    <PageHeader guide="operations" eyebrow="DATA OPERATIONS" title="Pipeline health and data coverage" aside={<button className="button" onClick={() => setReload((value) => value + 1)}>Refresh</button>}>Connector runs from the ingestion ledger, dbt test results and lineage from dbt's own artifacts, and coverage of every Gold model by country. Everything here is read-only.</PageHeader>
     <section className="metrics">
       <article><small>CONNECTORS</small><strong>{ingestion.connectors.length - failing.length}/{ingestion.connectors.length} healthy</strong><p>{failing.length ? `Last run failed: ${failing.map((item) => `${item.provider} ${item.dataset}`).join(', ')}.` : 'The latest run of every connector succeeded.'}</p></article>
       <article><small>DBT TESTS</small><strong>{dbt.available ? `${dbt.counts?.pass ?? 0} passed${testsFailed ? ` · ${testsFailed} failed` : ''}` : 'No results'}</strong><p>{dbt.available ? `From ${dbt.command ?? 'dbt'} at ${dateTime(dbt.generated_at)}.` : dbt.note}</p></article>
