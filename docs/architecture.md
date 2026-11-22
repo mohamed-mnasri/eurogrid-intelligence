@@ -20,7 +20,7 @@ flowchart LR
   subgraph Model["Modelling (Phase 3–4)"]
     NORM[normalize.py<br/>UTC, units, status]
     FCT[(DuckDB sources<br/>dim_geography, fct_*)]
-    DBT[dbt project<br/>staging → Gold, 24 tests]
+    DBT[dbt project<br/>staging → Gold, 42 tests,<br/>source freshness]
     GOLD[(Gold views<br/>price, generation, load,<br/>flows, weather, coverage)]
   end
 

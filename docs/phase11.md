@@ -59,10 +59,10 @@ Example (DE-LU spike, 14 Sep 2026, Berlin household of 3,500 kWh/yr):
 
 | Fault | dbt caught it | Quality gate | Rule-based report | AI agent report |
 |---|---|---|---|---|
-| Missing generation feed | no (24/24 tests pass) | generation: missing | limited; names generation; 0 causal claims | — |
+| Missing generation feed | no at the time (24/24 tests passed); **yes since the gap test was added** (41 pass, `no_hourly_gaps_gold_generation_mix_country_code` fails) | generation: missing | limited; names generation; 0 causal claims | — |
 | Malformed price feed | yes: `unique_gold_market_price_fact_key`, `accepted_values_..._price_status` | price: partial (50%) | limited; names price; 0 causal claims | limited; names price; 0 causal claims |
 
-The missing-feed result is a real finding. The dbt schema tests (unique, not null, accepted values) cannot detect absent rows; only the investigation's quality gate catches a gap.
+The missing-feed result was a real finding: the schema tests (unique, not null, accepted values) could not detect absent rows, so only the investigation's quality gate caught the gap. That led to a generic `no_hourly_gaps` dbt test (plus relationship, status and source-freshness checks, 24 → 42 tests). Re-running the same experiment on real data now fails the build: the clean copy passes 42/42 and the broken copy fails the gap test.
 
 Chaos mode also exposed a gap that is now fixed: a domain that was only *partly* available was not named in a report's missing evidence. Both investigators now name it, with the share of valid hours.
 
@@ -72,7 +72,7 @@ Chaos mode also exposed a gap that is now fixed: a domain that was only *partly*
 
 ## Synthetic source data
 
-`build_synthetic_sources` in `eurogrid/synthetic.py` writes the synthetic dataset as **source** tables (`dim_geography`, `fct_*`). Every row carries `provider='synthetic'`. The real dbt project builds it (12 models, 24 tests pass), so chaos tests and CI run without production data.
+`build_synthetic_sources` in `eurogrid/synthetic.py` writes the synthetic dataset as **source** tables (`dim_geography`, `fct_*`). Every row carries `provider='synthetic'`. The real dbt project builds it (12 models, 42 tests pass), so chaos tests and CI run without production data.
 
 ## Tests
 

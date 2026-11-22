@@ -57,9 +57,24 @@ models:
       - name: interval_start_utc
         data_tests: [not_null]
       - name: bidding_zone
-        data_tests: [not_null]
+        description: One row group per zone; no zone may miss whole hours inside its ingested range.
+        data_tests:
+          - not_null
+          - no_hourly_gaps
       - name: price_eur_per_mwh
         description: Day-ahead market price in EUR/MWh.
+      - name: data_status
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['valid', 'missing', 'invalid', 'stale']
+      - name: geography_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_geography')
+                field: geography_id
 
   - name: gold_generation_mix
     description: One row per geography, production type, and interval; standardized in MW.
@@ -70,6 +85,22 @@ models:
         data_tests: [not_null]
       - name: generation_mw
         description: Public generation power in MW; null means unavailable or invalid.
+      - name: country_code
+        description: No country may miss whole hours of generation inside its ingested range.
+        data_tests:
+          - no_hourly_gaps
+      - name: data_status
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['valid', 'missing', 'invalid', 'stale']
+      - name: geography_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_geography')
+                field: geography_id
 
   - name: gold_demand
     description: Public-power load series in MW at each reported interval.
@@ -78,6 +109,21 @@ models:
         data_tests: [not_null, unique]
       - name: demand_mw
         description: Provider-reported load power in MW, not interval energy.
+      - name: country_code
+        data_tests:
+          - no_hourly_gaps
+      - name: data_status
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['valid', 'missing', 'invalid', 'stale']
+      - name: geography_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_geography')
+                field: geography_id
 
   - name: gold_cross_border_flow
     description: Provider-reported net scheduled cross-border trading series in MW.
@@ -86,6 +132,18 @@ models:
         data_tests: [not_null, unique]
       - name: net_cross_border_trading_mw
         description: Signed value as supplied by Energy-Charts; sign is not reinterpreted.
+      - name: data_status
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['valid', 'missing', 'invalid', 'stale']
+      - name: geography_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_geography')
+                field: geography_id
 
   - name: gold_weather
     description: Weather observations at coordinate locations, not whole-country averages.
@@ -94,6 +152,18 @@ models:
         data_tests: [not_null, unique]
       - name: interval_start_utc
         data_tests: [not_null]
+      - name: data_status
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['valid', 'missing', 'invalid', 'stale']
+      - name: geography_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_geography')
+                field: geography_id
 
   - name: gold_market_coverage
     description: Observed price coverage used to populate the selectable market list.

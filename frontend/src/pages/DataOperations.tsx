@@ -8,7 +8,8 @@ type Run = { run_id: number; provider: string; dataset: string; geography: strin
 type Ingestion = { connectors: Connector[]; recent_runs: Run[]; note?: string }
 type DbtResult = { name: string; status: string; failures: number | null; message: string | null; model: string | null; execution_time_s: number }
 type Lineage = { name: string; kind: string; materialized: string; parents: string[]; downstream: string[] }
-type Dbt = { available: boolean; note?: string; generated_at?: string; command?: string; counts?: Record<string, number>; results?: DbtResult[]; lineage?: Lineage[] }
+type SourceFreshness = { source: string; status: string; max_loaded_at: string | null; age_hours: number | null }
+type Dbt = { available: boolean; note?: string; generated_at?: string; command?: string; counts?: Record<string, number>; results?: DbtResult[]; lineage?: Lineage[]; freshness?: SourceFreshness[] }
 type Fresh = { geography: string; domain: string; model: string; rows: number; valid_pct: number; last_interval_utc: string; missing_hours: number; expected_hours: number; age_days: number | null; status: string }
 type Freshness = { reference_utc: string; items: Fresh[]; rules: string }
 type PipelineStage = { stage: string; status: string; duration_s: number | null; details: Record<string, unknown>; error: string | null }
@@ -87,6 +88,9 @@ export default function DataOperations({ chaos }: { chaos?: ReactNode }) {
           <tbody>{ingestion.recent_runs.map((run) => <tr key={run.run_id}><td>{run.run_id}</td><td>{dateTime(run.started_at)}</td><td>{run.provider} · {run.dataset}</td><td>{run.geography || '—'}</td><td>{run.start ?? '—'} → {run.end ?? '—'}</td><td><StatusPill status={run.status} /></td><td>{fmt(run.rows_received, 0)}{run.cache_hit ? ' (cache)' : ''}</td><td className="wrap">{run.error_details ?? '—'}</td></tr>)}</tbody></table></div>
       </Section>
       <Section title="dbt tests" intro={dbt.available ? `${dbt.results?.length ?? 0} results from target/run_results.json.` : dbt.note}>
+        {dbt.available && (dbt.freshness ?? []).length > 0 && <div className="table-scroll"><table className="compact"><thead><tr><th>Source freshness</th><th>Status</th><th>Newest interval</th><th>Age</th></tr></thead>
+          <tbody>{(dbt.freshness ?? []).map((item) => <tr key={item.source}><td>{item.source}</td><td><StatusPill status={item.status === 'pass' ? 'complete' : item.status === 'warn' ? 'stale' : 'missing'} /> <small className="muted">{item.status}</small></td><td>{dateTime(item.max_loaded_at)}</td><td>{item.age_hours != null ? `${fmt(item.age_hours / 24, 1)} days` : '—'}</td></tr>)}</tbody></table>
+          <p className="table-note">dbt source freshness: warn after 3 days, error after 10 days without new intervals (run by the pipeline before each build).</p></div>}
         {dbt.available && <div className="table-scroll"><table><thead><tr><th>Test</th><th>Model</th><th>Status</th><th>Failing rows</th><th>Time</th></tr></thead>
           <tbody>{(dbt.results ?? []).map((item) => <tr key={item.name}><td className="wrap">{item.name}</td><td>{item.model ?? '—'}</td><td><StatusPill status={item.status} /></td><td>{item.failures ?? '—'}</td><td>{fmt(item.execution_time_s, 2)} s</td></tr>)}</tbody></table></div>}
       </Section>

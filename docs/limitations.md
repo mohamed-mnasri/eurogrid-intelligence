@@ -21,7 +21,7 @@ These are stated plainly so nobody reads more into the results than the data sup
   - The first evaluation run showed the model misfiling unchanged series as relationships. That is why code now re-files those as observations.
 - **The evaluation suite is small and synthetic.** It has seven controlled cases. Passing it shows the guardrails work on known conditions; it is not an accuracy figure for real events.
 - **The evaluation does not cover:** outage records, timestamp shifts and duplicate intervals in the investigator. Duplicates are caught by dbt tests in chaos mode.
-- **dbt tests can't see gaps.** The schema tests (unique, not null, accepted values) cannot detect missing rows; chaos mode shows this. Gaps are caught by the investigation quality gate and the Data Operations coverage matrix, not by dbt.
+- **Gap detection is per hour.** The `no_hourly_gaps` dbt test fails when a zone or country misses whole hours inside its ingested range (it was added after chaos mode showed schema tests could not see a missing feed). A missing quarter-hour inside an otherwise present hour, or missing data at the very end of the range, is not caught by it; source freshness and the coverage matrix cover the end of the range.
 
 ## Household simulation and replay
 

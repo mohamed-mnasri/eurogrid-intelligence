@@ -152,12 +152,15 @@ def dbt_stage(context: RunContext) -> dict[str, Any]:
     if context.results.get("normalize", {}).get("files") == 0 and context.results.get("ingest", {}).get("status") == "skipped":
         return {"status": "skipped", "reason": "no new data since the last run"}
     result = run_dbt(config.database, config.data_dir / "metadata" / "dbt_pipeline", config.project_dir,
-                     config.project_dir / "target")
+                     config.project_dir / "target", freshness=True)
     if not result.get("ran"):
         return {"status": "failed", "reason": result.get("reason")}
     failing = [item["name"] for item in result.get("results", []) if item["status"] in {"fail", "error"}]
-    return {"status": "failed" if failing or result["exit_code"] else "success", "counts": result.get("counts"),
-            "failing": failing, "exit_code": result["exit_code"]}
+    stale = [item["source"] for item in result.get("freshness", []) if item["status"] in {"warn", "error"}]
+    status = "failed" if failing or result["exit_code"] else "partial" if stale else "success"
+    return {"status": status, "counts": result.get("counts"), "failing": failing, "exit_code": result["exit_code"],
+            "freshness": {item["source"]: item["status"] for item in result.get("freshness", [])},
+            **({"reason": f"sources older than the freshness limit: {', '.join(stale)}"} if stale else {})}
 
 
 def detect_stage(context: RunContext) -> dict[str, Any]:

@@ -14,13 +14,23 @@ sources:
         description: >
           Day-ahead market price intervals. Values are normalized to EUR/MWh.
           Geography is a bidding zone, such as DE-LU.
-
+        loaded_at_field: interval_end_utc
+        freshness:
+          warn_after: {count: 3, period: day}
+          error_after: {count: 10, period: day}
       - name: fct_generation
         description: >
           Electricity generation observations normalized to MW. The sample
           currently includes an all-Europe aggregate.
-
+        loaded_at_field: interval_end_utc
+        freshness:
+          warn_after: {count: 3, period: day}
+          error_after: {count: 10, period: day}
       - name: fct_weather
         description: >
           Weather observations for a coordinate location. Temperature is °C,
           wind speed is m/s, and shortwave radiation is W/m².
+        loaded_at_field: interval_end_utc
+        freshness:
+          warn_after: {count: 3, period: day}
+          error_after: {count: 10, period: day}

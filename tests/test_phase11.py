@@ -159,8 +159,9 @@ class ChaosTests(unittest.TestCase):
         before = self.counts(self.production)
         missing = run_chaos("missing_feed", event, self.production, self.root / "chaos")
         self.assertTrue(missing["faulty"]["dbt"]["ran"], missing["faulty"]["dbt"].get("reason"))
-        self.assertFalse(missing["detected_by_dbt"])                         # schema tests do not see a gap...
-        self.assertEqual(missing["faulty"]["assessment"]["quality"]["generation"], "missing")   # ...the gate does
+        self.assertTrue(missing["detected_by_dbt"])                          # the hourly-gap test sees the hole...
+        self.assertIn("no_hourly_gaps_gold_generation_mix_country_code", missing["failing_tests"])
+        self.assertEqual(missing["faulty"]["assessment"]["quality"]["generation"], "missing")   # ...and so does the gate
         self.assertEqual(missing["clean"]["assessment"]["quality"]["generation"], "complete")
         self.assertIn("gold_generation_mix", missing["downstream_models"])
         self.assertEqual(missing["report_checks"]["rule-based"], {"not_complete": True, "names_missing_evidence": True,

@@ -4,7 +4,7 @@
 
 | Handbook item | Delivered |
 |---|---|
-| CI | `.github/workflows/ci.yml`: Python unit/service/API/agent/chaos tests; `dbt build` + 24 tests on synthetic sources; frontend lint + build |
+| CI | `.github/workflows/ci.yml`: Python unit/service/API/agent/chaos tests; `dbt build` + 42 tests on synthetic sources; frontend lint + build |
 | Pinned dependencies | `requirements-lock.txt` (exact, tested), `requirements-dbt.txt` (separate dbt environment), `frontend/package-lock.json`; `requirements.txt` keeps compatible ranges |
 | Exact setup commands | README quick start (synthetic demo) and full setup (real data) |
 | Redistributable sample | `python -m eurogrid.demo`: generated synthetic data (no third-party data, so no licence restrictions) built by the real dbt project, with detected events, investigations and an evaluation run; the app labels it **Synthetic demo data** |

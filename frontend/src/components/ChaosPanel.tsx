@@ -77,7 +77,7 @@ function ChaosResult({ result }: { result: ChaosRun }) {
         <h4>1 · dbt build and tests</h4>
         <p>Clean copy: {result.clean.dbt.counts?.pass ?? 0} tests passed. Broken copy: {result.faulty.dbt.counts?.pass ?? 0} passed, {(result.faulty.dbt.counts?.fail ?? 0) + (result.faulty.dbt.counts?.error ?? 0)} failed.</p>
         {result.detected_by_dbt ? <ul className="plain">{result.failing_tests.map((name) => <li key={name}><StatusPill status="fail" /> {name}</li>)}</ul>
-          : <p className="warning-note">No dbt test failed. The project's schema tests (unique, not null, accepted values) cannot see rows that are absent; only the quality gate below caught this fault.</p>}
+          : <p className="warning-note">No dbt test failed: this fault is not covered by a dbt test, so only the quality gate below caught it.</p>}
         <h4>2 · Downstream impact</h4>
         <p>dbt models built from <code>{result.source_table}</code>: {result.downstream_models.join(', ') || 'none'}.</p>
         <p>App outputs that read them: {result.affected_outputs.join(', ')}.</p>

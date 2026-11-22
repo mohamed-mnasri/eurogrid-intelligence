@@ -118,7 +118,20 @@ class OperationsService:
             counts[test["status"]] = counts.get(test["status"], 0) + 1
         return {"available": True, "generated_at": results.get("metadata", {}).get("generated_at"),
                 "command": results.get("args", {}).get("which"), "counts": counts, "results": tests,
-                "lineage": self._lineage(manifest)}
+                "lineage": self._lineage(manifest), "freshness": self._freshness(target / "sources.json")}
+
+    @staticmethod
+    def _freshness(path: Path) -> list[dict[str, Any]]:
+        """dbt source freshness results (pass / warn / error per source table), if the command has run."""
+        if not path.exists():
+            return []
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return [{"source": item["unique_id"].split(".")[-1], "status": item.get("status"),
+                 "max_loaded_at": item.get("max_loaded_at"), "snapshotted_at": item.get("snapshotted_at"),
+                 "age_hours": round(item["max_loaded_at_time_ago_in_s"] / 3600, 1)
+                 if item.get("max_loaded_at_time_ago_in_s") is not None else None,
+                 "criteria": item.get("criteria")}
+                for item in data.get("results", [])]
 
     @staticmethod
     def _lineage(manifest: dict[str, Any]) -> list[dict[str, Any]]:

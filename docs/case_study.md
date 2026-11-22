@@ -14,7 +14,7 @@ EuroGrid Intelligence takes public market data and does three things with it:
 
 Everything runs locally on free, keyless sources: Energy-Charts, Open-Meteo, PVGIS and Eurostat.
 
-**The pipeline.** Python connectors with retries and a run ledger feed raw, content-addressed files. A normalizer turns them into DuckDB. A dbt project builds tested Gold models (24 data tests). A FastAPI layer has bounded, typed endpoints, and a seven-page React app sits on top.
+**The pipeline.** Python connectors with retries and a run ledger feed raw, content-addressed files. A normalizer turns them into DuckDB. A dbt project builds tested Gold models (42 data tests, plus source freshness), orchestrated by a pipeline command that loads only new files and records every stage. A FastAPI layer has bounded, typed endpoints, and a seven-page React app sits on top.
 
 **The AI part, and why it's small.** A local Qwen 3.5 (4B) model runs in Ollama inside a LangGraph workflow. The model does only two things: it picks the next tool from an allowlist, and it drafts findings that cite evidence IDs. Code does everything else:
 
@@ -38,6 +38,7 @@ Both runs stay in the history.
 
 - A *malformed* price feed failed two dbt tests (duplicate keys, invalid status).
 - A *missing* generation feed passed **all 24 dbt tests**, because schema tests can't see rows that aren't there. Only the investigation's quality gate caught it, and the report turned "limited" and named the missing evidence.
+- So I wrote a generic hourly-gap dbt test (and relationship, status and freshness checks). The same experiment on real data now fails the build: 42/42 on the clean copy, the gap test failing on the broken one.
 - The chaos runs also showed that partially missing data wasn't being named in reports. That's fixed now.
 
 **Grid-to-Home.** Replaying a real German price spike (14 Sep 2026, peak €697/MWh) against a simulated Berlin household gave these results for that day:

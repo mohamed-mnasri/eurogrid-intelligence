@@ -91,11 +91,12 @@ def dbt_executable() -> Path | None:
 
 
 def run_dbt(database: Path, workdir: Path, project_dir: Path = Path("eurogrid_analytics"),
-            target_dir: Path | None = None) -> dict[str, Any]:
+            target_dir: Path | None = None, freshness: bool = False) -> dict[str, Any]:
     """`dbt build` against ``database`` with a throwaway profile written to ``workdir``.
 
     Artifacts go to ``target_dir`` (default ``workdir/target``). Chaos runs keep the default so they never
     touch the project's target/; the pipeline passes the project target so Data Operations shows the result.
+    ``freshness=True`` first runs ``dbt source freshness`` (it writes target/sources.json), then the build.
     """
     executable = dbt_executable()
     if executable is None:
@@ -110,6 +111,11 @@ def run_dbt(database: Path, workdir: Path, project_dir: Path = Path("eurogrid_an
     command = [str(executable), "build", "--project-dir", str(project_dir.resolve()), "--profiles-dir", str(workdir.resolve()),
                "--target", "chaos", "--target-path", str(target.resolve()), "--log-path", str((workdir / "logs").resolve())]
     env = {**os.environ, "DO_NOT_TRACK": "1", "DBT_SEND_ANONYMOUS_USAGE_STATS": "False"}
+    if freshness:
+        (target / "sources.json").unlink(missing_ok=True)
+        fresh = [command[0], "source", "freshness", *command[2:]]
+        subprocess.run(fresh, capture_output=True, text=True, env=env, timeout=600)
+        (target / "run_results.json").unlink(missing_ok=True)
     completed = subprocess.run(command, capture_output=True, text=True, env=env, timeout=600)
     if not (target / "run_results.json").exists():
         return {"ran": False, "reason": f"dbt did not produce results (exit {completed.returncode}): "
