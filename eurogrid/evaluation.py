@@ -18,6 +18,10 @@ Scored dimensions (pass/fail per case):
 * ``unsupported_claims``     – zero statements with causal wording and no proven causes (target: zero).
 * ``repeatability``          – investigating again gives the same report ID and statements (rule-based only).
 
+With ``repeats > 1`` the whole suite runs several times; a check passes only if it passed in every run, and
+``stability`` reports how many runs each case passed. Every run records investigation latency and, for the
+agent, model calls and tokens.
+
 Not covered yet (documented, not hidden): outage records overlapping the event
 (no outage source is connected), timestamp shifts and duplicate intervals
 (caught by dbt uniqueness tests and chaos mode rather than by the investigator).
@@ -29,7 +33,9 @@ import argparse
 import json
 import re
 import sqlite3
+import statistics
 import sys
+import time
 from contextlib import closing
 import tempfile
 from dataclasses import asdict, dataclass, field
@@ -111,14 +117,20 @@ def rule_based(event: dict[str, Any], tools: InvestigationTools, store: CaseStor
     return report.model_dump()
 
 
-def agent_investigator(model: str, max_tool_calls: int = 6) -> Investigator:
-    """The Phase 9 agent with a local Ollama model (slow; CLI only)."""
-    def run(event: dict[str, Any], tools: InvestigationTools, store: CaseStore, out_dir: Path) -> dict[str, Any]:
+class agent_investigator:
+    """The Phase 9 agent with a local Ollama model (slow; CLI only). Keeps the last run's telemetry."""
+
+    def __init__(self, model: str, max_tool_calls: int = 6) -> None:
+        self.model, self.max_tool_calls = model, max_tool_calls
+        self.last_telemetry: dict[str, Any] | None = None
+
+    def __call__(self, event: dict[str, Any], tools: InvestigationTools, store: CaseStore, out_dir: Path) -> dict[str, Any]:
         from eurogrid.agent import run_investigation
         from eurogrid.llm import OllamaLLM
 
-        return run_investigation(event["anomaly_id"], tools, store, OllamaLLM(model), out_dir, max_tool_calls)["report"]
-    return run
+        final = run_investigation(event["anomaly_id"], tools, store, OllamaLLM(self.model), out_dir, self.max_tool_calls)
+        self.last_telemetry = final.get("telemetry")
+        return final["report"]
 
 
 def _cited_tools(report: dict[str, Any]) -> set[str]:
@@ -184,17 +196,55 @@ def run_case(case: EvaluationCase, investigator: Investigator, generator: str, w
     store.save_events([item for item in events if item.anomaly_id == event["anomaly_id"]])
     if case.blocked_after_detection:
         delete_event_prices(db_path)
+    started = time.perf_counter()
     report = investigator(event, tools, store, workdir / "reports")
+    elapsed = time.perf_counter() - started
+    telemetry = getattr(investigator, "last_telemetry", None)
     repeat = investigator(event, tools, store, workdir / "reports") if generator == "rule-based-v1" else None
-    return score_case(case, event, report, repeat, generator)
+    result = score_case(case, event, report, repeat, generator)
+    result.details["investigation_s"] = round(elapsed, 3)
+    if telemetry and telemetry.get("measured"):
+        result.details["llm"] = {key: telemetry[key] for key in ("calls", "failed_calls", "model_s",
+                                                                 "prompt_tokens", "completion_tokens")}
+    return result
+
+
+def _percentile(values: list[float], share: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    return round(ordered[min(len(ordered) - 1, int(round(share * (len(ordered) - 1))))], 3)
 
 
 def run_suite(generator: str = "rule-based", model: str = "qwen3.5:4b",
-              cases: tuple[EvaluationCase, ...] = CASES) -> dict[str, Any]:
+              cases: tuple[EvaluationCase, ...] = CASES, repeats: int = 1) -> dict[str, Any]:
     investigator, name = ((rule_based, "rule-based-v1") if generator == "rule-based"
                           else (agent_investigator(model), f"langgraph-ollama:{model}"))
-    with tempfile.TemporaryDirectory() as temp:
-        results = [run_case(case, investigator, name, Path(temp)) for case in cases]
+    runs: list[list[CaseResult]] = []
+    for _ in range(max(1, repeats)):
+        with tempfile.TemporaryDirectory() as temp:
+            runs.append([run_case(case, investigator, name, Path(temp)) for case in cases])
+    # A check passes only if it passed in every run; details come from the first run.
+    results = []
+    for index, first in enumerate(runs[0]):
+        merged = CaseResult(first.case_id, first.label, first.description, name, first.status, first.report_id,
+                            dict(first.checks), dict(first.details))
+        for run in runs[1:]:
+            for key, ok in run[index].checks.items():
+                merged.checks[key] = merged.checks.get(key, True) and ok
+        merged.details["passed_runs"] = sum(1 for run in runs if run[index].passed)
+        results.append(merged)
+    durations = [result.details["investigation_s"] for run in runs for result in run if "investigation_s" in result.details]
+    llm = [result.details["llm"] for run in runs for result in run if "llm" in result.details]
+    performance = {"investigations": len(durations), "median_s": _percentile(durations, 0.5),
+                   "p95_s": _percentile(durations, 0.95), "max_s": round(max(durations), 3) if durations else None}
+    if llm:
+        performance.update({
+            "median_model_calls": statistics.median(item["calls"] for item in llm),
+            "median_prompt_tokens": statistics.median(item["prompt_tokens"] for item in llm),
+            "median_completion_tokens": statistics.median(item["completion_tokens"] for item in llm),
+            "total_tokens": sum(item["prompt_tokens"] + item["completion_tokens"] for item in llm),
+            "failed_model_calls": sum(item["failed_calls"] for item in llm)})
     dimensions = sorted({key for result in results for key in result.checks})
     return {
         "generator": name, "created_at": datetime.now(UTC).isoformat(), "dataset": "synthetic (eurogrid.synthetic)",
@@ -202,6 +252,8 @@ def run_suite(generator: str = "rule-based", model: str = "qwen3.5:4b",
         "dimension_totals": {key: {"passed": sum(1 for r in results if r.checks.get(key)),
                                    "scored": sum(1 for r in results if key in r.checks)} for key in dimensions},
         "cases_passed": sum(1 for result in results if result.passed), "cases_total": len(results),
+        "repeats": len(runs), "cases_passed_per_run": [sum(1 for result in run if result.passed) for run in runs],
+        "performance": performance,
         "rules": __doc__.split("Scored dimensions (pass/fail per case):")[1].split("Not covered yet")[0].strip(),
         "not_covered": "Outage records overlapping the event (no outage source connected); timestamp shifts and "
                        "duplicate intervals (handled by dbt tests and chaos mode).",
@@ -241,6 +293,7 @@ class EvaluationStore:
             data = json.loads(payload)
             items.append({"run_id": run_id, "generator": data["generator"], "created_at": data["created_at"],
                           "cases_passed": data["cases_passed"], "cases_total": data["cases_total"],
+                          "repeats": data.get("repeats", 1), "performance": data.get("performance"),
                           "failed_checks": {case["case_id"]: [k for k, v in case["checks"].items() if not v]
                                             for case in data["cases"] if not case["passed"]}})
         return items
@@ -252,11 +305,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the Scenario Lab evaluation suite")
     parser.add_argument("--generator", choices=["rule-based", "agent"], default="rule-based")
     parser.add_argument("--model", default="qwen3.5:4b")
+    parser.add_argument("--repeats", type=int, default=1, help="run the suite N times; a check must pass in every run")
     parser.add_argument("--store", type=Path, default=Path("data/metadata/evaluations.sqlite"))
     args = parser.parse_args(argv)
-    payload = run_suite(args.generator, args.model)
+    payload = run_suite(args.generator, args.model, repeats=args.repeats)
     EvaluationStore(args.store).save(payload)
-    print(f"{payload['generator']}: {payload['cases_passed']}/{payload['cases_total']} cases passed every check")
+    print(f"{payload['generator']}: {payload['cases_passed']}/{payload['cases_total']} cases passed every check "
+          f"in all {payload['repeats']} run(s); per run: {payload['cases_passed_per_run']}")
+    print(f"performance: {json.dumps(payload['performance'])}")
     for case in payload["cases"]:
         failed = [name for name, ok in case["checks"].items() if not ok]
         print(f"  {'PASS' if case['passed'] else 'FAIL'}  {case['case_id']:<22} status={case['status']}"

@@ -15,7 +15,8 @@ type Report = {
   missing_evidence: string[]; limitations: string[]; tool_trace: ToolCall[]; evidence: Evidence[]
 }
 type ReportSummary = { report_id: string; generator: string; status: string; created_at: string }
-type Trace = { report_id: string; generator: string; model: string | null; node_trace: string[]; tool_trace: ToolCall[]; draft_findings: { category: string; statement: string; evidence_ids: string[] }[]; missing_evidence: string[] }
+type Telemetry = { measured: boolean; calls?: number; failed_calls?: number; wall_s?: number | null; model_s?: number; prompt_tokens?: number; completion_tokens?: number; median_call_s?: number }
+type Trace = { report_id: string; generator: string; model: string | null; telemetry?: Telemetry; node_trace: string[]; tool_trace: ToolCall[]; draft_findings: { category: string; statement: string; evidence_ids: string[] }[]; missing_evidence: string[] }
 type Zone = { bidding_zone: string }
 
 const PAGE = 25
@@ -160,7 +161,13 @@ function ReportView({ report, onEvidence }: { report: Report; onEvidence: (id: s
 }
 
 function TraceView({ trace, onEvidence }: { trace: Trace; onEvidence: (id: string) => void }) {
+  const t = trace.telemetry
   return <div className="trace">
+    {t?.measured && <div className="telemetry"><b>Model cost of this investigation</b>
+      <span>{t.calls} model calls{t.failed_calls ? ` (${t.failed_calls} invalid)` : ''}</span>
+      <span>{fmt(t.wall_s, 1)} s total · median {fmt(t.median_call_s, 1)} s per call</span>
+      <span>{fmt(t.prompt_tokens, 0)} prompt + {fmt(t.completion_tokens, 0)} output tokens</span>
+      <span className="muted">Local model: no API cost; time is on this PC's GPU/CPU.</span></div>}
     <h3>Path through the workflow</h3>
     <ol className="timeline">{trace.node_trace.map((step, index) => { const [node, detail] = step.split(':'); return <li key={index} className={step.includes('by model') ? 'by-model' : step.includes('by code') ? 'by-code' : ''}><b>{titleCase(node)}</b>{detail && <span>{detail}</span>}</li> })}</ol>
     <h3>Tool calls</h3>

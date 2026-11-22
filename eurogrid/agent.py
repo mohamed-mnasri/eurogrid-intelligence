@@ -22,6 +22,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import logging
+import time
 import re
 import sys
 from datetime import datetime
@@ -35,7 +37,9 @@ from eurogrid.agent_tools import TOOL_DESCRIPTIONS, PolicyViolation, ToolCallReq
 from eurogrid.investigation import (RULES, CaseStore, Finding, InvestigationReport, ToolCall, material_change,
                                    partial_domain_notes, render_markdown)
 from eurogrid.investigation_tools import Evidence, InvestigationTools
-from eurogrid.llm import LLM, LLMError, OllamaLLM
+from eurogrid.llm import LLM, LLMError, OllamaLLM, summarize_calls
+
+log = logging.getLogger(__name__)
 
 CORE_DOMAINS = ("price", "generation", "load")
 UNUSABLE = {"missing", "unavailable", "not_applicable"}
@@ -138,6 +142,8 @@ def build_graph(tools: InvestigationTools, store: CaseStore, llm: LLM, max_tool_
             choice, chosen_by = (remaining[0] if remaining else "finish"), "code (model reply was invalid)"
         if choice != "finish" and choice not in remaining:
             choice, chosen_by = (remaining[0] if remaining else "finish"), "code (model repeated a tool)"
+        if chosen_by != "model":
+            log.warning("Agent fallback for %s: next tool %s chosen by %s", state["anomaly_id"], choice, chosen_by)
         return {"next_tool": choice, "next_tool_by": chosen_by,
                 "node_trace": state["node_trace"] + [f"choose_tool:{choice} by {chosen_by}"]}
 
@@ -149,6 +155,7 @@ def build_graph(tools: InvestigationTools, store: CaseStore, llm: LLM, max_tool_
         try:
             result = execute_tool(tools, request, window, calls)
         except PolicyViolation as exc:
+            log.warning("Blocked tool call for %s: %s", state["anomaly_id"], exc)
             return {"missing_evidence": state["missing_evidence"] + [f"Blocked tool call: {exc}"],
                     "node_trace": state["node_trace"] + ["run_tool:blocked"]}
         missing = list(state["missing_evidence"])
@@ -190,6 +197,7 @@ def build_graph(tools: InvestigationTools, store: CaseStore, llm: LLM, max_tool_
             findings = [finding.model_dump() for finding in draft.findings]
             note = "write_report"
         except LLMError as exc:
+            log.warning("Report draft failed for %s: %s", state["anomaly_id"], exc)
             findings, note = [], f"write_report:failed ({exc})"
         return {"draft_findings": findings, "node_trace": state["node_trace"] + [note]}
 
@@ -288,14 +296,17 @@ def build_graph(tools: InvestigationTools, store: CaseStore, llm: LLM, max_tool_
 def run_investigation(anomaly_id: str, tools: InvestigationTools, store: CaseStore, llm: LLM,
                       out_dir: Path, max_tool_calls: int = 6) -> AgentState:
     app = build_graph(tools, store, llm, max_tool_calls)
+    first_call, started = len(getattr(llm, "calls", [])), time.perf_counter()
     final = app.invoke({"anomaly_id": anomaly_id}, {"recursion_limit": 50})
+    telemetry = summarize_calls(list(getattr(llm, "calls", []))[first_call:], time.perf_counter() - started)
+    final["telemetry"] = telemetry
     report = InvestigationReport(**final["report"])
     store.save_report(report)
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / f"{report.report_id}.md").write_text(render_markdown(report), encoding="utf-8")
     trace = {"report_id": report.report_id, "model": llm.name, "node_trace": final["node_trace"],
              "tool_trace": final["tool_trace"], "draft_findings": final.get("draft_findings", []),
-             "missing_evidence": final["missing_evidence"], "status": final["status"]}
+             "missing_evidence": final["missing_evidence"], "status": final["status"], "telemetry": telemetry}
     (out_dir / f"{report.report_id}_trace.json").write_text(json.dumps(trace, indent=2), encoding="utf-8")
     store.save_trace(report.report_id, trace)
     return final
