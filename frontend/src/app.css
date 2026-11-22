@@ -72,6 +72,7 @@ tr.clickable { cursor: pointer; }
 tr.clickable:hover td { background: #12201b; }
 td.link { color: #8fe0ad; white-space: nowrap; }
 td.nowrap { white-space: nowrap; }
+small.stage-note { display: block; margin-top: 4px; color: #82978c; font-size: 10.5px; white-space: normal; max-width: 220px; }
 td.wrap { white-space: normal; max-width: 420px; line-height: 1.45; }
 td.negative, .negative { color: #ffab9b; }
 td.positive { color: #8fe0ad; }

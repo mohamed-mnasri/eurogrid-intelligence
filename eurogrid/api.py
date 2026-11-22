@@ -19,7 +19,9 @@ The browser never reads DuckDB directly.
 
 from __future__ import annotations
 
+import logging
 import os
+import time
 from datetime import date
 from pathlib import Path
 from typing import Any, Callable, Literal
@@ -40,6 +42,7 @@ from eurogrid.household_service import household_benchmark, household_price_hist
 from eurogrid.investigation import InvestigationReport
 from eurogrid.investigation_tools import APPROVED_TOOLS, Evidence, InvestigationTools, ToolResult
 from eurogrid.llm import LLM
+from eurogrid.logging_setup import configure_logging
 from eurogrid.market_service import MarketDataError, MarketService
 from eurogrid.operations_service import OperationsService
 from eurogrid.replay import WindowPVProvider
@@ -79,6 +82,18 @@ def create_app(database_path: Path | None = None, data_dir: Path | None = None,
     app = FastAPI(title="EuroGrid Intelligence API", version=API_VERSION, openapi_tags=TAGS,
                   description="Read-only market analytics, deterministic anomaly investigations and household "
                               "PV/battery simulations backed by tested dbt Gold models.")
+    configure_logging()
+    request_log = logging.getLogger("eurogrid.api")
+
+    @app.middleware("http")
+    async def log_requests(request: Request, call_next):
+        started = time.perf_counter()
+        response = await call_next(request)
+        elapsed = (time.perf_counter() - started) * 1000
+        level = logging.WARNING if response.status_code >= 500 else logging.INFO
+        request_log.log(level, "%s %s -> %s in %.0f ms", request.method, request.url.path, response.status_code, elapsed)
+        return response
+
     app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
                        allow_credentials=False, allow_methods=["GET", "POST"], allow_headers=["*"])
 
@@ -358,6 +373,11 @@ def create_app(database_path: Path | None = None, data_dir: Path | None = None,
     def operations_freshness() -> dict[str, Any]:
         """Rows, latest interval, missing hours and status per geography and domain in the Gold models."""
         return operations().freshness()
+
+    @app.get("/api/operations/pipeline", tags=["operations"])
+    def operations_pipeline(limit: int = Query(default=20, ge=1, le=100)) -> list[dict[str, Any]]:
+        """Recent pipeline runs (ingest, normalize, dbt build, detect) with stage status, timing and details."""
+        return operations().pipeline_runs(limit)
 
     @app.get("/api/operations/sources", tags=["operations"])
     def operations_sources() -> list[dict[str, str]]:

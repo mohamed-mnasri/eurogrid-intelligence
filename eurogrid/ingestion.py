@@ -8,6 +8,7 @@ SQLite records a row for every attempted run, including failures.
 from __future__ import annotations
 
 import hashlib
+import logging
 import json
 import re
 import sqlite3
@@ -175,6 +176,7 @@ class IngestionStore:
             return IngestionResult(raw_path, raw_sha, request_sha, rows, cache_hit)
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
+            logging.getLogger(__name__).warning("Ingestion failed (%s): %s", (identity or {}).get("endpoint", "?"), error)
             raise
         finally:
             finished = datetime.now(timezone.utc).isoformat()

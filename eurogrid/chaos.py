@@ -90,8 +90,13 @@ def dbt_executable() -> Path | None:
     return next((path for path in candidates if path.exists() and _has_duckdb_adapter(str(path.resolve()))), None)
 
 
-def run_dbt(database: Path, workdir: Path, project_dir: Path = Path("eurogrid_analytics")) -> dict[str, Any]:
-    """`dbt build` against ``database`` with a throwaway profile; artifacts go to ``workdir``, never target/."""
+def run_dbt(database: Path, workdir: Path, project_dir: Path = Path("eurogrid_analytics"),
+            target_dir: Path | None = None) -> dict[str, Any]:
+    """`dbt build` against ``database`` with a throwaway profile written to ``workdir``.
+
+    Artifacts go to ``target_dir`` (default ``workdir/target``). Chaos runs keep the default so they never
+    touch the project's target/; the pipeline passes the project target so Data Operations shows the result.
+    """
     executable = dbt_executable()
     if executable is None:
         return {"ran": False, "reason": "dbt executable not found (set EUROGRID_DBT_EXECUTABLE or create .venv-dbt)"}
@@ -99,7 +104,9 @@ def run_dbt(database: Path, workdir: Path, project_dir: Path = Path("eurogrid_an
     profile = (f"eurogrid_analytics:\n  target: chaos\n  outputs:\n    chaos:\n      type: duckdb\n"
                f"      path: '{database.resolve().as_posix()}'\n      threads: 1\n")
     (workdir / "profiles.yml").write_text(profile, encoding="utf-8")
-    target = workdir / "target"
+    target = target_dir or workdir / "target"
+    target.mkdir(parents=True, exist_ok=True)
+    (target / "run_results.json").unlink(missing_ok=True)   # never mistake old results for this run
     command = [str(executable), "build", "--project-dir", str(project_dir.resolve()), "--profiles-dir", str(workdir.resolve()),
                "--target", "chaos", "--target-path", str(target.resolve()), "--log-path", str((workdir / "logs").resolve())]
     env = {**os.environ, "DO_NOT_TRACK": "1", "DBT_SEND_ANONYMOUS_USAGE_STATS": "False"}
@@ -107,7 +114,7 @@ def run_dbt(database: Path, workdir: Path, project_dir: Path = Path("eurogrid_an
     if not (target / "run_results.json").exists():
         return {"ran": False, "reason": f"dbt did not produce results (exit {completed.returncode}): "
                                         f"{(completed.stdout + completed.stderr)[-600:]}"}
-    summary = OperationsService(database, workdir, workdir).dbt()   # reads workdir/target artifacts
+    summary = OperationsService(database, workdir, target.parent).dbt()   # reads <target>/run_results.json
     return {"ran": True, "exit_code": completed.returncode, **summary}
 
 

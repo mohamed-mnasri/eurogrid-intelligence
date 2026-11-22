@@ -76,12 +76,62 @@ class NormalizeTests(unittest.TestCase):
                     "hourly": {"time": [f"2025-01-14T{h:02d}:00" for h in range(23, 24)] + [f"2025-01-15T{h:02d}:00" for h in range(24)] + ["2025-01-16T00:00"],
                     "temperature_2m": [4] * 26, "wind_speed_10m": [3.6] * 26, "shortwave_radiation": [0] * 26}}}
                 norm.load_weather(weather, "weather-hash")
-                count = norm.db.execute("SELECT count(*) FROM vw_market_weather_aligned WHERE weather_value IS NOT NULL").fetchone()[0]
+                count = norm.db.execute("""SELECT count(*) FROM fct_market_price p
+                    JOIN fct_weather w USING (interval_start_utc)""").fetchone()[0]
                 self.assertEqual(count, 24 * 3)
                 self.assertEqual(norm.db.execute("SELECT count(DISTINCT interval_start_utc) FROM fct_market_price").fetchone()[0], 24)
                 self.assertEqual(norm.db.execute("SELECT value FROM fct_weather WHERE variable='wind_speed' LIMIT 1").fetchone()[0], 1.0)
                 norm.load_prices(price, "price-hash")
                 self.assertEqual(norm.db.execute("SELECT count(*) FROM fct_market_price").fetchone()[0], 24)
+            finally:
+                norm.close()
+
+    def _ingest_versions(self, root, values):
+        """Fetch the same day twice with different provider values, in the given order."""
+        from eurogrid.ingestion import IngestionStore
+        store = IngestionStore(root)
+        identity = {"provider": "energy-charts", "dataset": "day_ahead_price", "endpoint": "/v2/price",
+                    "request_parameters": {"bzn": "DE-LU", "start": "2025-01-15"}}
+        for value in values:
+            sample = price_sample(hours("2025-01-15", 0, 24))
+            for row in sample["payload"]["data"]:
+                row["values"]["day_ahead_price"] = value
+            store.ingest(lambda sample=sample: sample, identity=identity, force_refresh=True)
+        return store
+
+    def test_most_recently_fetched_version_wins_whatever_the_file_names(self):
+        for order in ((50.0, 60.0), (60.0, 50.0)):         # both orders, so file-name sorting cannot decide
+            with self.subTest(order=order), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                store = self._ingest_versions(root, order)
+                norm = Normalizer(root / "grid.duckdb")
+                try:
+                    counts = norm.load_directory(root / "raw", store.db_path)
+                    self.assertEqual(counts["files"], 2)
+                    values = norm.db.execute("SELECT DISTINCT value FROM fct_market_price").fetchall()
+                    self.assertEqual(values, [(order[-1],)])
+                    full = norm.load_directory(root / "raw", store.db_path, full=True)
+                    self.assertEqual(full["files"], 2)
+                    self.assertEqual(norm.db.execute("SELECT DISTINCT value FROM fct_market_price").fetchall(),
+                                     [(order[-1],)])
+                finally:
+                    norm.close()
+
+    def test_reruns_only_load_new_files_and_count_unreadable_ones(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = self._ingest_versions(root, (50.0,))
+            (root / "raw" / "broken.json").write_text("{not json", encoding="utf-8")
+            norm = Normalizer(root / "grid.duckdb")
+            try:
+                first = norm.load_directory(root / "raw", store.db_path)
+                self.assertEqual((first["files"], first["unreadable"]), (1, 1))
+                again = norm.load_directory(root / "raw", store.db_path)
+                self.assertEqual((again["files"], again["already_loaded"], again["market_price"]), (0, 1, 0))
+                self._ingest_versions(root, (70.0,))
+                newer = norm.load_directory(root / "raw", store.db_path)
+                self.assertEqual((newer["files"], newer["already_loaded"]), (1, 1))
+                self.assertEqual(norm.db.execute("SELECT DISTINCT value FROM fct_market_price").fetchall(), [(70.0,)])
             finally:
                 norm.close()
 

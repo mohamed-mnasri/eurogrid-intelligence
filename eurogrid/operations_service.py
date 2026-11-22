@@ -181,6 +181,12 @@ class OperationsService:
                          f"{STALE_AFTER_DAYS} days; partial = under {COMPLETE_VALID_RATIO:.0%} valid rows or present "
                          "hours between the first and last interval; otherwise complete."}
 
+    def pipeline_runs(self, limit: int = 20) -> list[dict[str, Any]]:
+        """Recent `python -m eurogrid.pipeline run` executions with per-stage status and timing."""
+        from eurogrid.pipeline import PipelineStore
+
+        return PipelineStore(self.ledger_path).runs(limit) if self.ledger_path.exists() else []
+
     @staticmethod
     def sources() -> list[dict[str, str]]:
         return SOURCES

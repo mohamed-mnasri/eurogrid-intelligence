@@ -9,40 +9,13 @@ from __future__ import annotations
 
 import argparse
 import time
-from dataclasses import dataclass
 from datetime import date, timedelta
 
 from eurogrid.cli import ingest_generation, ingest_price, ingest_weather
 from eurogrid.ingestion import IngestionStore
+from eurogrid.markets import MARKETS
 
 MAX_SEED_DAYS = 731
-
-
-@dataclass(frozen=True)
-class Market:
-    """Provider geography plus optional market price and weather coordinates."""
-
-    name: str
-    country_code: str
-    bidding_zone: str | None = None
-    latitude: float | None = None
-    longitude: float | None = None
-    reference_city: str | None = None
-
-
-# The provider returns these two as European aggregates; they cannot be split
-# back into country or regional values unless countries are fetched separately.
-MARKETS = (
-    Market("All Europe", "all"),
-    Market("Germany", "de", "DE-LU", 52.52, 13.405, "Berlin"),
-    Market("France", "fr", "FR", 48.8566, 2.3522, "Paris"),
-    Market("Spain", "es", "ES", 40.4168, -3.7038, "Madrid"),
-    Market("Poland", "pl", "PL", 52.2297, 21.0122, "Warsaw"),
-    Market("Netherlands", "nl", "NL", 52.3676, 4.9041, "Amsterdam"),
-    # Public power is available for the UK; this Energy-Charts price catalogue
-    # does not provide a UK bidding-zone price, so no price request is made.
-    Market("United Kingdom", "uk", None, 51.5072, -0.1276, "London"),
-)
 
 
 def latest_complete_month(today: date | None = None) -> tuple[str, str]:

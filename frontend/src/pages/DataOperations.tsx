@@ -11,7 +11,21 @@ type Lineage = { name: string; kind: string; materialized: string; parents: stri
 type Dbt = { available: boolean; note?: string; generated_at?: string; command?: string; counts?: Record<string, number>; results?: DbtResult[]; lineage?: Lineage[] }
 type Fresh = { geography: string; domain: string; model: string; rows: number; valid_pct: number; last_interval_utc: string; missing_hours: number; expected_hours: number; age_days: number | null; status: string }
 type Freshness = { reference_utc: string; items: Fresh[]; rules: string }
+type PipelineStage = { stage: string; status: string; duration_s: number | null; details: Record<string, unknown>; error: string | null }
+type PipelineRun = { run_id: string; started_at: string; status: string; window: string[] | null; stages: PipelineStage[] }
 type Source = { provider: string; datasets: string; licence: string; attribution: string; access: string; url: string; status: string }
+
+function stageNote(stage: PipelineStage) {
+  const d = stage.details
+  if (stage.error) return ` · ${stage.error.split('\n')[0].slice(0, 80)}`
+  if (typeof d.reason === 'string') return ` · ${d.reason}`
+  if (stage.stage === 'ingest' && typeof d.rows_received === 'number') return ` · ${fmt(d.rows_received, 0)} rows${Array.isArray(d.failures) && d.failures.length ? `, ${d.failures.length} failed` : ''}`
+  if (stage.stage === 'normalize' && typeof d.files === 'number') return ` · ${d.files} new file(s)`
+  if (stage.stage === 'dbt' && Array.isArray(d.failing) && d.failing.length) return ` · failing: ${d.failing.join(', ')}`
+  if (stage.stage === 'dbt' && d.counts) return ` · ${Object.entries(d.counts as Record<string, number>).map(([k, v]) => `${v} ${k}`).join(', ')}`
+  if (stage.stage === 'detect' && d.events) return ` · ${Object.values(d.events as Record<string, number>).reduce((a, b) => a + b, 0)} event(s)`
+  return ''
+}
 
 const DOMAINS = ['price', 'generation', 'load', 'cross_border_flows', 'weather']
 
@@ -24,12 +38,13 @@ export default function DataOperations({ chaos }: { chaos?: ReactNode }) {
   const [dbt, setDbt] = useState<Dbt | null>(null)
   const [freshness, setFreshness] = useState<Freshness | null>(null)
   const [sources, setSources] = useState<Source[]>([])
+  const [pipeline, setPipeline] = useState<PipelineRun[]>([])
   const [error, setError] = useState('')
   const [reload, setReload] = useState(0)
 
   useEffect(() => {
-    Promise.all([getJson<Ingestion>('/api/operations/ingestion'), getJson<Dbt>('/api/operations/dbt'), getJson<Freshness>('/api/operations/freshness'), getJson<Source[]>('/api/operations/sources')])
-      .then(([a, b, c, d]) => { setIngestion(a); setDbt(b); setFreshness(c); setSources(d); setError('') })
+    Promise.all([getJson<Ingestion>('/api/operations/ingestion'), getJson<Dbt>('/api/operations/dbt'), getJson<Freshness>('/api/operations/freshness'), getJson<Source[]>('/api/operations/sources'), getJson<PipelineRun[]>('/api/operations/pipeline')])
+      .then(([a, b, c, d, e]) => { setIngestion(a); setDbt(b); setFreshness(c); setSources(d); setPipeline(e); setError('') })
       .catch((reason: Error) => setError(reason.message))
   }, [reload])
 
@@ -52,6 +67,12 @@ export default function DataOperations({ chaos }: { chaos?: ReactNode }) {
       <article><small>NEWEST DATA</small><strong>{newest ? newest.slice(0, 10) : '—'}</strong><p>Latest interval end across all Gold models, checked {dateTime(freshness.reference_utc)}.</p></article>
     </section>
     <section className="charts">
+      <Section title="Pipeline runs" intro={<>Each <code>python -m eurogrid.pipeline run</code>: ingest → normalize (new raw files only, newest fetch wins) → dbt build and tests → anomaly detection. A failed stage stops the run.</>}>
+        {pipeline.length === 0 ? <Empty title="No pipeline runs yet.">Run <code>python -m eurogrid.pipeline run</code> to ingest the days since the newest stored price.</Empty>
+          : <div className="table-scroll"><table><thead><tr><th>Started</th><th>Window</th><th>Status</th>{['ingest', 'normalize', 'dbt', 'detect'].map((name) => <th key={name}>{titleCase(name)}</th>)}</tr></thead>
+            <tbody>{pipeline.map((run) => <tr key={run.run_id}><td>{dateTime(run.started_at)}</td><td>{run.window ? `${run.window[0]} → ${run.window[1]}` : 'up to date'}</td><td><StatusPill status={run.status} /></td>
+              {['ingest', 'normalize', 'dbt', 'detect'].map((name) => { const stage = run.stages.find((item) => item.stage === name); return <td key={name}>{stage ? <><StatusPill status={stage.status} /><small className="stage-note">{stage.duration_s != null ? `${fmt(stage.duration_s, 1)} s` : ''}{stageNote(stage)}</small></> : '—'}</td> })}</tr>)}</tbody></table></div>}
+      </Section>
       {chaos}
       <Section title="Coverage by country and domain" intro="Each cell: status, latest interval, and hours missing between the first and last interval. Missing hours are counted, never filled.">
         {freshness.items.length === 0 ? <Empty title="No Gold data found." /> : <div className="table-scroll"><table className="matrix"><thead><tr><th>Geography</th>{DOMAINS.map((domain) => <th key={domain}>{titleCase(domain)}</th>)}</tr></thead>

@@ -2,6 +2,14 @@
 
 The normalizer maps geography, timestamps and units into analytical DuckDB
 tables while keeping source timestamps, units, hashes, and quality statuses.
+
+Loads are incremental and recency-correct:
+
+* ``raw_load`` records every raw file already loaded (by content hash), so a rerun only reads new files;
+* files are applied in the order they were *fetched* (``started_at`` in the ingestion ledger, file time as a
+  fallback). Facts are upserted by interval key, so when a provider revises an interval the most recently
+  fetched version wins, regardless of how file names sort;
+* unreadable or unsupported files are counted and logged instead of being skipped silently.
 """
 
 from __future__ import annotations
@@ -10,14 +18,19 @@ import argparse
 import csv
 import hashlib
 import json
+import logging
 import math
+import sqlite3
 import tempfile
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
 import duckdb
+
+log = logging.getLogger(__name__)
 
 # These series are ratios or consumption measures, not generation or trade/load.
 # Demand and net cross-border trading are retained with the other public-power
@@ -124,13 +137,12 @@ class Normalizer:
           interval_minutes INTEGER, original_timestamp VARCHAR, source_timezone VARCHAR, variable VARCHAR,
           original_value DOUBLE, original_unit VARCHAR, value DOUBLE, unit VARCHAR, data_status VARCHAR,
           provider VARCHAR, dataset VARCHAR, raw_sha256 VARCHAR)""")
-        self.db.execute("CREATE OR REPLACE VIEW stg_market_price AS SELECT * FROM fct_market_price")
-        self.db.execute("CREATE OR REPLACE VIEW stg_generation AS SELECT * FROM fct_generation")
-        self.db.execute("CREATE OR REPLACE VIEW stg_weather AS SELECT * FROM fct_weather")
-        self.db.execute("""CREATE OR REPLACE VIEW vw_market_weather_aligned AS
-          SELECT p.*, w.variable AS weather_variable, w.value AS weather_value, w.unit AS weather_unit,
-                 w.geography_id AS weather_geography_id
-          FROM fct_market_price p LEFT JOIN fct_weather w USING(interval_start_utc)""")
+        self.db.execute("""CREATE TABLE IF NOT EXISTS raw_load(
+          raw_sha256 VARCHAR PRIMARY KEY, path VARCHAR, provider VARCHAR, dataset VARCHAR,
+          fetched_at VARCHAR, loaded_at VARCHAR, rows INTEGER)""")
+        # Staging views belong to dbt (eurogrid_analytics/models/staging). The old exploratory join that
+        # matched on time alone across all geographies is removed.
+        self.db.execute("DROP VIEW IF EXISTS vw_market_weather_aligned")
 
     def close(self) -> None:
         """Close the DuckDB connection after loading or inspection."""
@@ -168,30 +180,66 @@ class Normalizer:
         finally:
             temp_path.unlink(missing_ok=True)
 
-    def load_directory(self, raw_dir: Path) -> dict[str, int]:
-        """Transactionally load supported price, generation, and weather samples."""
-        counts = {"market_price": 0, "generation": 0, "weather": 0, "files": 0}
+    @staticmethod
+    def _fetch_times(ledger: Path | None) -> dict[str, str]:
+        """First successful fetch time per raw file hash, from the ingestion ledger."""
+        if ledger is None or not ledger.exists():
+            return {}
+        with closing(sqlite3.connect(ledger)) as db:
+            rows = db.execute("""SELECT raw_sha256, min(started_at) FROM ingestion_run
+                WHERE status='success' AND raw_sha256 IS NOT NULL GROUP BY raw_sha256""").fetchall()
+        return {sha: started for sha, started in rows}
+
+    def load_directory(self, raw_dir: Path, ledger: Path | None = None, full: bool = False) -> dict[str, int]:
+        """Load new raw files in fetch order inside one transaction (``full=True`` reloads every file)."""
+        counts = {"market_price": 0, "generation": 0, "weather": 0, "files": 0, "already_loaded": 0,
+                  "unreadable": 0, "unsupported": 0}
+        fetched = self._fetch_times(ledger)
+        loaded = set() if full else {row[0] for row in self.db.execute("SELECT raw_sha256 FROM raw_load").fetchall()}
+        pending = []
+        for path in self._files(raw_dir):
+            raw_sha = hashlib.sha256(path.read_bytes()).hexdigest()
+            if raw_sha in loaded:
+                counts["already_loaded"] += 1
+                continue
+            stamp = fetched.get(raw_sha) or datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat()
+            pending.append((stamp, str(path), path, raw_sha))
+        pending.sort()   # oldest fetch first, so later fetches overwrite earlier versions of the same interval
         self.db.execute("BEGIN TRANSACTION")
         try:
-            for path in self._files(raw_dir):
+            for stamp, _, path, raw_sha in pending:
                 try:
                     sample = json.loads(path.read_text(encoding="utf-8"))
-                    if not {"provider", "dataset", "payload"}.issubset(sample):
-                        continue
-                except (OSError, json.JSONDecodeError):
+                except (OSError, json.JSONDecodeError) as exc:
+                    counts["unreadable"] += 1
+                    log.warning("Skipping unreadable raw file %s: %s", path, exc)
                     continue
-                raw_sha = hashlib.sha256(path.read_bytes()).hexdigest()
+                if not isinstance(sample, dict) or not {"provider", "dataset", "payload"}.issubset(sample):
+                    counts["unsupported"] += 1
+                    log.warning("Skipping raw file without provider/dataset/payload: %s", path)
+                    continue
                 if sample["provider"] == "energy-charts" and sample["dataset"] == "day_ahead_price":
-                    counts["market_price"] += self.load_prices(sample, raw_sha)
+                    rows, key = self.load_prices(sample, raw_sha), "market_price"
                 elif sample["provider"] == "energy-charts" and sample["dataset"] == "public_power":
-                    counts["generation"] += self.load_generation(sample, raw_sha)
+                    rows, key = self.load_generation(sample, raw_sha), "generation"
                 elif sample["provider"] == "open-meteo" and sample["dataset"] == "historical_weather":
-                    counts["weather"] += self.load_weather(sample, raw_sha)
+                    rows, key = self.load_weather(sample, raw_sha), "weather"
+                else:
+                    counts["unsupported"] += 1
+                    log.info("No normalizer for %s/%s (%s)", sample["provider"], sample["dataset"], path.name)
+                    continue
+                counts[key] += rows
                 counts["files"] += 1
+                self.db.execute("INSERT OR REPLACE INTO raw_load VALUES (?,?,?,?,?,?,?)",
+                                [raw_sha, str(path), sample["provider"], sample["dataset"], stamp,
+                                 datetime.now(timezone.utc).isoformat(), rows])
             self.db.execute("COMMIT")
         except Exception:
             self.db.execute("ROLLBACK")
+            log.exception("Normalization rolled back; no partial load was kept")
             raise
+        log.info("Normalized %s new file(s) (%s already loaded, %s unreadable, %s unsupported)", counts["files"],
+                 counts["already_loaded"], counts["unreadable"], counts["unsupported"])
         return counts
 
     def _source(self, sample: dict[str, Any]) -> tuple[str, str, int]:
@@ -308,10 +356,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--raw", type=Path, default=Path("data/raw"))
     parser.add_argument("--database", type=Path, default=Path("data/eurogrid.duckdb"))
+    parser.add_argument("--ledger", type=Path, default=Path("data/metadata/ingestion_runs.sqlite3"))
+    parser.add_argument("--full", action="store_true", help="reload every raw file instead of only new ones")
     args = parser.parse_args(argv)
+    from eurogrid.logging_setup import configure_logging
+    configure_logging()
     normalizer = Normalizer(args.database)
     try:
-        print(normalizer.load_directory(args.raw))
+        print(normalizer.load_directory(args.raw, args.ledger, args.full))
     finally:
         normalizer.close()
     return 0
