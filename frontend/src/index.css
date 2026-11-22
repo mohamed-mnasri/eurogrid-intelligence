@@ -1,0 +1,2 @@
+/* Global document sizing is set here; component styles live in styles.css. */
+html { min-width: 360px; background: #0a1110; }

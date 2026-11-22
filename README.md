@@ -1,55 +1,209 @@
 # EuroGrid Intelligence
 
-European Grid-to-Home Energy Intelligence Platform
+**European Grid-to-Home Energy Intelligence Platform.** It ingests public European electricity-market data and finds unusual price hours. It investigates them with evidence, using a deterministic engine or a local AI model whose every statement is checked by code. It also shows what an event would have meant for a household with solar and a battery. It runs locally, on free, keyless public sources.
 
-EuroGrid will combine European electricity-market data with transparent household solar and battery scenarios. Its market analysis and energy calculations will be deterministic; AI will later investigate verified results and explain evidence with clear limitations.
+![AI investigation: activity trace with model telemetry](docs/screenshots/investigation-trace.png)
 
-## Current stage
+## What it demonstrates (measured, not claimed)
 
-**Phase 0: project skeleton and source registration.** This repository currently contains project conventions, source/licence notes, setup guidance for Visual Studio Code, and read-only API probes. It does not yet contain production connectors, a database, analytics, an AI agent, or a frontend.
+**Data pipeline**
+- **Ingest → normalize → dbt build → detect, in one command.** Loads are incremental: only new raw files, applied in fetch order so a revised interval always keeps its newest version. Every run and stage is recorded.
+- **First run on real data:** 1–21 Nov 2026, 18 requests, 5.2M generation rows loaded, 42/42 dbt tests and source freshness passing.
 
-The architecture is pan-European. Coverage is discovered from provider metadata and each endpoint's live response; it can differ by data family and date. Germany, France, Spain, Italy and the Netherlands are the first validation markets in the handbook, not the geographic limit. Energy-Charts public generation supports `country=all`, which the Phase 0 probe has verified. Day-ahead prices require one bidding zone per request and have zone-specific licensing, so an all-Europe price request is not available from that API. See `docs/sources.md`.
+**Testing the tests**
+- **Chaos mode breaks a copy of the data on purpose.** Missing feed: all 24 schema tests passed, so I wrote a `no_hourly_gaps` test. The same experiment now fails the build (42/42 on the clean copy, the gap test failing on the broken one).
+- **Malformed feed:** two dbt tests fail and lineage lists every affected model.
 
-## Phase 0 setup in Visual Studio Code
+**AI agent**
+- **Guarded local agent.** A local 4B model (Ollama) chooses tools from an allowlist and drafts findings. Code checks every statement's evidence, wording and materiality.
+- **Measured on 7 synthetic cases with known causes.**
+  - The first evaluation passed 1/7: the model called unchanged series "relationships".
+  - A deterministic materiality check raised it to **7/7 in each of 3 repeated runs**, with 0 failed model calls.
+  - Cost per investigation: a median of 41 s, 7 model calls, and about 7.7k prompt + 1.4k output tokens. The rule-based engine takes 0.3 s.
 
-1. Install Python 3.11 or newer if needed, then open this folder in VS Code.
-2. Open **Terminal → New Terminal** and create the environment:
+**Grid-to-Home**
+- **Replaying a real German price spike** (14 Sep 2026, peak €697/MWh) against a simulated Berlin household, for that day:
+  - a fixed tariff: +€0.00;
+  - an illustrative dynamic tariff: +€1.49;
+  - with 4 kWp of solar: +€0.96;
+  - with solar and a 5 kWh battery: +€0.04.
 
-   ```powershell
-   py -3 -m venv .venv
-   .\.venv\Scripts\Activate.ps1
-   python -m pip install -r requirements.txt
-   Copy-Item .env.example .env
-   ```
+| Investigation and evidence | Event replay | Data operations and chaos mode |
+|---|---|---|
+| ![Investigation](docs/screenshots/investigation-trace.png) | ![Replay](docs/screenshots/replay.png) | ![Data operations](docs/screenshots/data-operations.png) |
+| **Scenario Lab** | **Market Analytics** | **Market Overview** |
+| ![Scenario Lab](docs/screenshots/scenario-lab.png) | ![Analytics](docs/screenshots/analytics.png) | ![Overview](docs/screenshots/overview.png) |
 
-   If PowerShell blocks activation, use `\.venv\Scripts\python.exe` directly in the following commands.
-3. In VS Code, choose the `.venv` interpreter (`Ctrl+Shift+P` → **Python: Select Interpreter**).
-4. Run the initial public-source checks:
+## Pages
 
-   ```powershell
-   python scripts/phase0_probe.py
-   ```
+| Page | What it does |
+|---|---|
+| Market Overview | Prices, household-price reference, grid use, generation and weather for a country and month |
+| Market Analytics | Country comparison, month × hour price heatmap, detected anomalies |
+| AI Investigations | Cases with evidence-linked findings, activity trace, Markdown/JSON export; rule-based or local LLM agent |
+| Renewable Planner | Hourly PV/battery simulation, bills, payback, NPV, sensitivity, battery dispatch |
+| Event Replay | A market event replayed against a simulated household: tariffs, systems, usual vs actual prices |
+| Data Operations | Connector runs, dbt tests and lineage, coverage gaps, licence register, chaos mode |
+| Scenario Lab | Synthetic cases with known causes, scored check by check |
 
-   The probes make a small number of read-only requests, print response metadata and a short sample, and do not save provider data. They honor the Energy-Charts low request rate by making at most one request per endpoint on each run. See `docs/sources.md` for the source and licence inventory.
+See [architecture](docs/architecture.md), [data dictionary](docs/data_dictionary.md), [sources and licences](docs/sources.md) and [known limitations](docs/limitations.md).
 
-## Run the Phase 0 tests
+## Quick start: synthetic demo (no credentials, no data download)
 
-In the VS Code terminal, activate `.venv` as above and run the offline unit tests:
+Requires Windows, macOS or Linux with **Python 3.12, 3.13 or 3.14** (3.12 and 3.13 run in CI; 3.14 verified with a fresh clone) and **Node.js 24**. The commands below are PowerShell; `py -3` picks your newest Python (use `py -3.13` to choose one). On macOS/Linux use `python3 -m venv .venv` and `.venv/bin/python` instead of `.\.venv\Scripts\python.exe`.
 
 ```powershell
-python -m unittest discover -s tests -v
+py -3 -m venv .venv
 ```
 
-These tests check the all-Europe generation selector, zone-scoped prices, licence preservation, missing-value handling and the HTTP helper. They do not call any API. To repeat the live connectivity checks separately, run `python scripts/phase0_probe.py` (this does make public read-only API requests).
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-lock.txt
+```
+
+Optional, so the demo is built by the real dbt project; without it the demo writes ready-made tables:
+
+```powershell
+py -3 -m venv .venv-dbt
+```
+
+```powershell
+.\.venv-dbt\Scripts\python.exe -m pip install -r requirements-dbt.txt
+```
+
+Build the demo. It writes `data/demo/` and prints the next commands:
+
+```powershell
+.\.venv\Scripts\python.exe -m eurogrid.demo
+```
+
+Start the API on the demo data:
+
+```powershell
+$env:EUROGRID_DB_PATH="data/demo/eurogrid_demo.duckdb"; $env:EUROGRID_DATA_DIR="data/demo"; $env:EUROGRID_DBT_DIR="data/demo/dbt"; .\.venv\Scripts\python.exe -m uvicorn eurogrid.api:app --host 127.0.0.1 --port 8000
+```
+
+In a second terminal, install and start the frontend, then open http://localhost:5173:
+
+```powershell
+npm --prefix frontend ci
+```
+
+```powershell
+npm --prefix frontend run dev
+```
+
+The app shows a **Synthetic demo data** banner. The demo contains invented data for Germany and France (Feb–Mar 2026) with a known injected price spike on 5 March. The Planner and Event Replay also call PVGIS, Open-Meteo and Eurostat (free, no key).
+
+**Optional AI agent:** install [Ollama](https://ollama.com/download), then run:
+
+```powershell
+ollama pull qwen3.5:4b
+```
+
+Use **Run AI agent** on a case. Without Ollama, the API returns a clear 503 and everything else keeps working.
+
+## Full setup with real data
+
+1. Create both environments as above.
+2. Run the pipeline. It ingests (respecting Energy-Charts' rate limit), normalizes, runs `dbt build` and `dbt source freshness`, and detects anomalies. Every run and stage is recorded and shown on **Data Operations**. A backfill is limited to 366 days per run, so backfill a longer history in yearly chunks:
+
+```powershell
+.\.venv\Scripts\python.exe -m eurogrid.pipeline run --start 2025-01-01 --end 2025-12-31
+```
+
+```powershell
+.\.venv\Scripts\python.exe -m eurogrid.pipeline run --start 2026-01-01 --end 2026-10-31
+```
+
+After that, a plain `run` is incremental: it fetches from the day after the newest stored price up to yesterday, and loads only new raw files.
+
+```powershell
+.\.venv\Scripts\python.exe -m eurogrid.pipeline run
+```
+
+```powershell
+.\.venv\Scripts\python.exe -m eurogrid.pipeline status
+```
+
+To schedule a daily run on Windows, run this from the repository folder (the task inherits that working directory):
+
+```powershell
+schtasks /Create /SC DAILY /ST 07:00 /TN "EuroGrid pipeline" /TR "cmd /c cd /d \"$PWD\" && .venv\Scripts\python.exe -m eurogrid.pipeline run"
+```
+
+3. Start the API without the demo variables, then start the frontend. Stop the API while the pipeline runs, because DuckDB allows one writer at a time.
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn eurogrid.api:app --reload --host 127.0.0.1 --port 8000
+```
+
+API documentation is at http://127.0.0.1:8000/docs. To run dbt by hand, copy `eurogrid_analytics/profiles.example.yml` to `eurogrid_analytics/profiles.yml` (gitignored, no credentials); see [the dbt project](eurogrid_analytics/README.md).
+
+## Tests and CI
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests
+```
+
+```powershell
+.\.venv\Scripts\python.exe scripts\dbt_synthetic_check.py
+```
+
+```powershell
+npm --prefix frontend test
+```
+
+```powershell
+npm --prefix frontend run lint
+```
+
+```powershell
+npm --prefix frontend run build
+```
+
+All tests run offline. LLM and PV calls use fakes; chaos tests use synthetic data and the real dbt project when `.venv-dbt` exists. GitHub Actions runs the same checks (see `.github/workflows/ci.yml`).
+
+## Evaluations and experiments
+
+Run the Scenario Lab suite with the rule-based investigator:
+
+```powershell
+.\.venv\Scripts\python.exe -m eurogrid.evaluation
+```
+
+Run it with the local AI agent, three times over, to measure how stable it is (a check passes only if it passes in every run). Each run reports latency and token use:
+
+```powershell
+.\.venv\Scripts\python.exe -m eurogrid.evaluation --generator agent --repeats 3
+```
+
+Run a chaos experiment against a detected anomaly:
+
+```powershell
+.\.venv\Scripts\python.exe -m eurogrid.chaos --fault missing_feed --anomaly-id <anm_id>
+```
+
+## How it was built, phase by phase
+
+| Phase | Guide |
+|---|---|
+| 0–1 Sources and connectors | [phase1](docs/phase1.md), [sources](docs/sources.md) |
+| 2 Ingestion, raw store, run ledger | [phase2](docs/phase2.md) |
+| 3 Normalization into DuckDB | [phase3](docs/phase3.md) |
+| 4 dbt models and tests | [phase4](docs/phase4.md) |
+| 5 Market overview dashboard | [phase5](docs/phase5.md) |
+| 6 Anomaly detection and rule-based investigations | [phase6](docs/phase6.md) |
+| 7 Household PV and battery simulation | [phase7](docs/phase7.md) |
+| 8 API service layer | [phase8](docs/phase8.md) |
+| 9 Local LLM agent (LangGraph + Ollama) | [phase9](docs/phase9.md) |
+| 10 Web application and Scenario Lab | [phase10](docs/phase10.md) |
+| 11 Event replay and chaos mode | [phase11](docs/phase11.md) |
+| 12 CI, pinned dependencies, demo, docs | [phase12](docs/phase12.md) |
 
 ## Data and security rules
 
-- Treat source terms and returned licence metadata as authoritative for each dataset.
-- Keep API tokens and private household data out of Git. `.env` is ignored; `.env.example` contains names only.
-- Missing data stays missing; it is never silently changed to zero.
-- Wholesale prices are not household retail tariffs.
-- Simulated household profiles and financial assumptions must be labeled as such.
-
-## Next phase
-
-Stop after Phase 0. Next phase is in progress currently ...
+- Each dataset's source terms, and the licence returned with each response, are authoritative. Raw and modelled data under `data/` is never committed.
+- No secrets are needed. If you add an ENTSO-E token later, keep it in `.env` (gitignored); `.env.example` lists names only.
+- Missing data stays missing; it is never silently filled with zero.
+- Wholesale prices are not household tariffs. Simulations, replays and synthetic data are labelled as such.
+- The AI model cannot run SQL, choose geographies or dates, or mark a cause as proven.

@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [master, "phase-*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Python ${{ matrix.python }} tests and dbt build (synthetic data)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: |
+            requirements-lock.txt
+            requirements-dbt.txt
+      - name: Install pinned Python dependencies
+        run: python -m pip install -r requirements-lock.txt
+      - name: Create the separate dbt environment
+        run: |
+          python -m venv .venv-dbt
+          .venv-dbt/bin/python -m pip install -r requirements-dbt.txt
+      - name: dbt build and tests on synthetic source data
+        run: python scripts/dbt_synthetic_check.py
+      - name: Unit, service, API, agent (fake model) and chaos tests
+        run: python -m unittest discover -s tests -v
+
+  frontend:
+    name: Frontend lint and build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build

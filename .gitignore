@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 .venv/
+.venv*/
 venv/
 
 # Local secrets and configuration
@@ -14,6 +15,9 @@ data/
 *.duckdb
 *.db
 *.parquet
+logs/
+target/
+dbt_packages/
 
 # Editor / OS
 .vscode/*
@@ -22,3 +26,6 @@ data/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Local dbt profile (copy of eurogrid_analytics/profiles.example.yml)
+eurogrid_analytics/profiles.yml
