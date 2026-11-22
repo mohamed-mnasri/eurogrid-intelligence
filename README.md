@@ -269,4 +269,8 @@ The full list is in [docs/limitations.md](docs/limitations.md).
 
 ## Licence
 
-No licence has been chosen yet, so all rights are reserved by default. Add a `LICENSE` file before others reuse the code.
+## Licence
+
+No open-source licence is currently provided. All rights to the original EuroGrid source code are reserved by the author. Reuse, redistribution, or modification requires prior permission.
+
+Third-party datasets, APIs, libraries, and other external resources remain subject to their respective licences and terms of use.
