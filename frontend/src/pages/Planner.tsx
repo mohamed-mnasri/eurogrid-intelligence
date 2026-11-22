@@ -14,6 +14,7 @@ export default function Planner() {
   const [year, setYear] = useState(2023)
   const [tariffKind, setTariffKind] = useState<'fixed' | 'dynamic'>('fixed')
   const [importPrice, setImportPrice] = useState(0.39)
+  const [priceSource, setPriceSource] = useState('illustrative default')
   const [exportPrice, setExportPrice] = useState(0.08)
   const [discount, setDiscount] = useState(4)
   const [horizon, setHorizon] = useState(20)
@@ -28,10 +29,22 @@ export default function Planner() {
 
   useEffect(() => { getJson<SystemConfig[]>('/api/simulations/default-systems').then(setSystems).catch((reason: Error) => setError(reason.message)) }, [])
   const location = LOCATIONS[place]
+  // Prefill the fixed import price from Eurostat's latest household price for the country (all taxes included).
+  useEffect(() => {
+    let active = true
+    getJson<{ retail_eur_per_kwh: number | null; retail_period: string | null }>('/api/household-benchmark', { geo: location.geo })
+      .then((value) => {
+        if (!active) return
+        if (value.retail_eur_per_kwh != null) { setImportPrice(Number(value.retail_eur_per_kwh.toFixed(3))); setPriceSource(`Eurostat ${value.retail_period ?? ''}, band 2,500–4,999 kWh, all taxes`) }
+        else { setImportPrice(location.retail); setPriceSource('illustrative default (Eurostat has no value)') }
+      })
+      .catch(() => { if (active) { setImportPrice(location.retail); setPriceSource('illustrative default (Eurostat unavailable)') } })
+    return () => { active = false }
+  }, [location.geo, location.retail])
   const dynamicYearOk = tariffKind === 'fixed' || pvSource === 'weather_model'
 
   function choosePlace(key: string) {
-    setPlace(key); setConsumption(LOCATIONS[key].household); setImportPrice(LOCATIONS[key].retail)
+    setPlace(key); setConsumption(LOCATIONS[key].household)
   }
   function chooseTariff(kind: 'fixed' | 'dynamic') {
     setTariffKind(kind)
@@ -62,7 +75,7 @@ export default function Planner() {
         <label>SOLAR DATA<select value={pvSource} onChange={(event) => { const value = event.target.value as 'pvgis' | 'weather_model'; setPvSource(value); if (value === 'pvgis' && year > 2023) setYear(2023) }}><option value="pvgis">PVGIS (EU JRC, 2005–2023)</option><option value="weather_model">Weather model (Open-Meteo)</option></select></label>
         <label>WEATHER YEAR<select value={year} onChange={(event) => setYear(Number(event.target.value))}>{(pvSource === 'pvgis' ? [2020, 2021, 2022, 2023] : [2023, 2024, 2025]).map((value) => <option key={value}>{value}</option>)}</select></label>
         <label>TARIFF<select value={tariffKind} onChange={(event) => chooseTariff(event.target.value as 'fixed' | 'dynamic')}><option value="fixed">Fixed price per kWh</option><option value="dynamic">Dynamic (follows wholesale)</option></select></label>
-        {tariffKind === 'fixed' ? <label>IMPORT PRICE (€/kWh)<input type="number" min={0.01} max={2} step={0.01} value={importPrice} onChange={(event) => setImportPrice(Number(event.target.value))} /></label>
+        {tariffKind === 'fixed' ? <label>IMPORT PRICE (€/kWh)<input type="number" min={0.01} max={2} step={0.01} value={importPrice} onChange={(event) => { setImportPrice(Number(event.target.value)); setPriceSource('your value') }} /><small className="field-note">{priceSource}</small></label>
           : <label>WHOLESALE MARKET<input value={location.zone} readOnly /></label>}
         <label>EXPORT PAYMENT (€/kWh)<input type="number" min={0} max={2} step={0.01} value={exportPrice} onChange={(event) => setExportPrice(Number(event.target.value))} /></label>
         <label>DISCOUNT RATE (%)<input type="number" min={0} max={20} step={0.5} value={discount} onChange={(event) => setDiscount(Number(event.target.value))} /></label>
