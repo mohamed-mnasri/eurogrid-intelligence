@@ -21,7 +21,9 @@ type Zone = { bidding_zone: string }
 
 const PAGE = 25
 
-export default function Investigations({ anomalyId }: { anomalyId: string }) {
+// Route parameter: <anomaly_id> or <anomaly_id>/<tab> (findings, trace or evidence), so a case view can be linked.
+export default function Investigations({ anomalyId: param }: { anomalyId: string }) {
+  const [anomalyId, linkedTab] = param.split('/')
   const [zones, setZones] = useState<Zone[]>([])
   const [zone, setZone] = useState('')
   const [direction, setDirection] = useState('')
@@ -56,12 +58,12 @@ export default function Investigations({ anomalyId }: { anomalyId: string }) {
             <div className="pager"><button className="button small" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE))}>← Newer</button><span>{offset + 1}–{Math.min(offset + PAGE, page.total)} of {page.total}</span><button className="button small" disabled={offset + PAGE >= page.total} onClick={() => setOffset(offset + PAGE)}>Older →</button></div>
           </>}
       </section>
-      <section className="case-detail">{anomalyId ? <CaseDetail key={anomalyId} anomalyId={anomalyId} /> : <Empty title="Select a case.">Pick an anomaly on the left to see its investigation, or start one.</Empty>}</section>
+      <section className="case-detail">{anomalyId ? <CaseDetail key={anomalyId} anomalyId={anomalyId} initialTab={linkedTab === 'trace' || linkedTab === 'evidence' ? linkedTab : 'report'} /> : <Empty title="Select a case.">Pick an anomaly on the left to see its investigation, or start one.</Empty>}</section>
     </div>
   </main>
 }
 
-function CaseDetail({ anomalyId }: { anomalyId: string }) {
+function CaseDetail({ anomalyId, initialTab }: { anomalyId: string; initialTab: 'report' | 'trace' | 'evidence' }) {
   const [event, setEvent] = useState<Anomaly | null>(null)
   const [reports, setReports] = useState<ReportSummary[]>([])
   const [selected, setSelected] = useState('')
@@ -72,7 +74,7 @@ function CaseDetail({ anomalyId }: { anomalyId: string }) {
   const [runError, setRunError] = useState('')
   const [model, setModel] = useState('qwen3.5:4b')
   const [evidenceId, setEvidenceId] = useState('')
-  const [tab, setTab] = useState<'report' | 'trace' | 'evidence'>('report')
+  const [tab, setTab] = useState<'report' | 'trace' | 'evidence'>(initialTab)
 
   useEffect(() => {
     Promise.all([getJson<Anomaly>(`/api/anomalies/${anomalyId}`), getJson<ReportSummary[]>(`/api/anomalies/${anomalyId}/investigations`)])

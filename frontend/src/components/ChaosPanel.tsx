@@ -31,7 +31,11 @@ export function ChaosPanel() {
 
   useEffect(() => {
     Promise.all([getJson<Record<string, Fault>>('/api/chaos/faults'), getJson<{ items: Event[] }>('/api/anomalies', { limit: 100 }), getJson<RunSummary[]>('/api/chaos/runs')])
-      .then(([available, anomalies, past]) => { setFaults(available); setEvents(anomalies.items); setAnomaly(anomalies.items[0]?.anomaly_id ?? ''); setRuns(past) })
+      .then(([available, anomalies, past]) => {
+        setFaults(available); setEvents(anomalies.items); setAnomaly(anomalies.items[0]?.anomaly_id ?? ''); setRuns(past)
+        // Show the latest experiment straight away; a new run replaces it.
+        if (past[0]) getJson<ChaosRun>(`/api/chaos/runs/${past[0].run_id}`).then(setResult).catch(() => undefined)
+      })
       .catch((reason: Error) => setError(reason.message))
   }, [])
 

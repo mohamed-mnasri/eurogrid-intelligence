@@ -20,7 +20,9 @@ type Replay = {
 type Simulation = { simulation_id: string; scenario_id: string; created_at: string }
 type ReplaySummary = { replay_id: string; anomaly_id: string; simulation_id: string; created_at: string }
 
-export default function ReplayPage({ anomalyId }: { anomalyId: string }) {
+// Route parameter: <anomaly_id> or <anomaly_id>/<replay_id>, so a stored replay can be linked.
+export default function ReplayPage({ anomalyId: param }: { anomalyId: string }) {
+  const [anomalyId, linkedReplay] = param.split('/')
   const [events, setEvents] = useState<Anomaly[]>([])
   const [simulations, setSimulations] = useState<Simulation[]>([])
   const [history, setHistory] = useState<ReplaySummary[]>([])
@@ -36,17 +38,25 @@ export default function ReplayPage({ anomalyId }: { anomalyId: string }) {
       .then(([anomalies, sims, past]) => { setEvents(anomalies.items); setSimulations(sims.items); setSimulationId(sims.items[0]?.simulation_id ?? ''); setHistory(past) })
       .catch((reason: Error) => setLoadError(reason.message))
   }, [])
+  useEffect(() => {
+    if (!linkedReplay) return
+    let active = true
+    getJson<Replay>(`/api/replays/${linkedReplay}`).then((value) => { if (active) { setResult(value); setOption(value.options.at(-1)?.option_id ?? 'no-system') } })
+      .catch((reason: Error) => { if (active) setError(reason.message) })
+    return () => { active = false }
+  }, [linkedReplay])
 
   async function run() {
     setRunning(true); setError('')
     try {
       const value = await postJson<Replay>('/api/replays', { anomaly_id: anomalyId, simulation_id: simulationId })
       setResult(value); setOption(value.options.at(-1)?.option_id ?? 'no-system')
+      navigate('replay', `${anomalyId}/${value.replay_id}`)
       setHistory(await getJson<ReplaySummary[]>('/api/replays'))
     } catch (reason) { setError((reason as Error).message) } finally { setRunning(false) }
   }
   async function open(replayId: string) {
-    try { const value = await getJson<Replay>(`/api/replays/${replayId}`); setResult(value); setOption(value.options.at(-1)?.option_id ?? 'no-system'); navigate('replay', value.anomaly.anomaly_id) }
+    try { const value = await getJson<Replay>(`/api/replays/${replayId}`); setResult(value); setOption(value.options.at(-1)?.option_id ?? 'no-system'); navigate('replay', `${value.anomaly.anomaly_id}/${value.replay_id}`) }
     catch (reason) { setError((reason as Error).message) }
   }
 
@@ -102,7 +112,7 @@ function ReplayView({ result, option, setOption }: { result: Replay; option: str
   const dynamicIndex = tariffs.findIndex((name) => name.toLowerCase().includes('dynamic'))
   return <section className="charts">
     <article className="chart-card full">
-      <div className="chart-title"><div><h2>Replay · {result.anomaly.geography} {result.anomaly.direction} · {result.window.start_utc.slice(0, 10)} ({result.window.timezone})</h2>
+      <div className="chart-title"><div><h2>Replay · {result.anomaly.geography} {result.anomaly.direction} · {new Date(result.window.start_utc).toLocaleDateString('en-CA', { timeZone: result.window.timezone })} ({result.window.timezone})</h2>
         <p>{result.scenario_id} household at {result.location.label || `${result.location.latitude}, ${result.location.longitude}`} · {result.window.hours} hours replayed · {result.labels.join(' · ')}</p></div>
         <span className="exports">Event-to-household report: <a href={`${API}/api/replays/${result.replay_id}/export?format=markdown`}>Markdown</a> · <a href={`${API}/api/replays/${result.replay_id}/export?format=json`}>JSON</a></span></div>
       <div className="replay-grid">

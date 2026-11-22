@@ -2,6 +2,40 @@
 
 **European Grid-to-Home Energy Intelligence Platform.** It ingests public European electricity-market data and finds unusual price hours. It investigates them with evidence, using a deterministic engine or a local AI model whose every statement is checked by code. It also shows what an event would have meant for a household with solar and a battery. It runs locally, on free, keyless public sources.
 
+![AI investigation: activity trace with model telemetry](docs/screenshots/investigation-trace.png)
+
+## What it demonstrates (measured, not claimed)
+
+**Data pipeline**
+- **Ingest → normalize → dbt build → detect, in one command.** Loads are incremental: only new raw files, applied in fetch order so a revised interval always keeps its newest version. Every run and stage is recorded.
+- **First run on real data:** 1–21 Nov 2026, 18 requests, 5.2M generation rows loaded, 42/42 dbt tests and source freshness passing.
+
+**Testing the tests**
+- **Chaos mode breaks a copy of the data on purpose.** Missing feed: all 24 schema tests passed, so I wrote a `no_hourly_gaps` test. The same experiment now fails the build (42/42 on the clean copy, the gap test failing on the broken one).
+- **Malformed feed:** two dbt tests fail and lineage lists every affected model.
+
+**AI agent**
+- **Guarded local agent.** A local 4B model (Ollama) chooses tools from an allowlist and drafts findings. Code checks every statement's evidence, wording and materiality.
+- **Measured on 7 synthetic cases with known causes.**
+  - The first evaluation passed 1/7: the model called unchanged series "relationships".
+  - A deterministic materiality check raised it to **7/7 in each of 3 repeated runs**, with 0 failed model calls.
+  - Cost per investigation: a median of 41 s, 7 model calls, and about 7.7k prompt + 1.4k output tokens. The rule-based engine takes 0.3 s.
+
+**Grid-to-Home**
+- **Replaying a real German price spike** (14 Sep 2026, peak €697/MWh) against a simulated Berlin household, for that day:
+  - a fixed tariff: +€0.00;
+  - an illustrative dynamic tariff: +€1.49;
+  - with 4 kWp of solar: +€0.96;
+  - with solar and a 5 kWh battery: +€0.04.
+
+| Investigation and evidence | Event replay | Data operations and chaos mode |
+|---|---|---|
+| ![Investigation](docs/screenshots/investigation-trace.png) | ![Replay](docs/screenshots/replay.png) | ![Data operations](docs/screenshots/data-operations.png) |
+| **Scenario Lab** | **Market Analytics** | **Market Overview** |
+| ![Scenario Lab](docs/screenshots/scenario-lab.png) | ![Analytics](docs/screenshots/analytics.png) | ![Overview](docs/screenshots/overview.png) |
+
+## Pages
+
 | Page | What it does |
 |---|---|
 | Market Overview | Prices, household-price reference, grid use, generation and weather for a country and month |

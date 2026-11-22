@@ -30,7 +30,8 @@ There is no SQL input anywhere, and "proven causes" is always empty. Public data
 
 - The rule-based investigator passed 7/7.
 - The first agent run passed **1/7**. The model labelled unchanged series as "relationships coinciding with the event".
-- I added a code check: a relationship must cite evidence that changed by the same thresholds the rule-based engine uses. Otherwise it is re-filed as an observation. The re-run passed **7/7**.
+- I added a code check: a relationship must cite evidence that changed by the same thresholds the rule-based engine uses. Otherwise it is re-filed as an observation. The re-run passed **7/7**, and **7/7 again in each of three repeated runs** with 0 failed model calls.
+- Each agent investigation costs a median of 41 s, 7 model calls, and about 7.7k prompt plus 1.4k output tokens on a local GPU (no API bill). The rule-based engine answers in 0.3 s. Both numbers are recorded with every run.
 
 Both runs stay in the history.
 

@@ -9,7 +9,8 @@ describe('formatting', () => {
   })
   it('formats numbers and signed euros', () => {
     expect(fmt(1234.567, 1)).toBe('1,234.6')
-    expect(euro(-1.5, 2)).toBe('−€1.5')
+    expect(euro(-1.5, 2)).toBe('−€1.50')
+    expect(euro(1234, 0)).toBe('€1,234')
     expect(euro(1.49, 2)).toBe('€1.49')
   })
   it('turns identifiers into labels', () => {

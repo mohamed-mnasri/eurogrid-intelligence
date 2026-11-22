@@ -26,7 +26,9 @@ export function fmt(value: number | null | undefined, digits = 1) {
 }
 export function euro(value: number | null | undefined, digits = 0) {
   if (value == null || !Number.isFinite(value)) return '—'
-  return value < 0 ? `−€${fmt(Math.abs(value), digits)}` : `€${fmt(value, digits)}`
+  // Money keeps its decimals (€0.50, not €0.5).
+  const text = new Intl.NumberFormat('en-GB', { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(Math.abs(value))
+  return value < 0 ? `−€${text}` : `€${text}`
 }
 export function dateTime(value: string | null | undefined) {
   if (!value) return '—'
