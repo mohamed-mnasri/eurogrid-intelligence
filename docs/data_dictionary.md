@@ -15,6 +15,7 @@ All timestamps are interval starts/ends in UTC (`TIMESTAMP WITH TIME ZONE`). Eve
 | `fct_market_price` | one row per price interval and bidding zone | Day-ahead price normalized to EUR/MWh. Intervals are 15 or 60 minutes. |
 | `fct_generation` | one row per interval, geography and `production_type` | Public-power series in MW. Includes `load` and `cross_border_electricity_trading`, which the Gold models split out. |
 | `fct_weather` | one row per interval, coordinate and `variable` | Covers `temperature` (°C), `wind_speed` (m/s) and `shortwave_radiation` (W/m²). |
+| `raw_load` | one row per raw file already loaded | Content hash, path, provider, dataset, fetch time (from the ledger), load time and row count. It makes reruns incremental, and files are applied in fetch order so the newest version of an interval wins. |
 
 ## Gold models (dbt, `eurogrid_analytics/models/marts`)
 
@@ -34,13 +35,15 @@ All timestamps are interval starts/ends in UTC (`TIMESTAMP WITH TIME ZONE`). Eve
 | File | Table | Contents |
 |---|---|---|
 | `ingestion_runs.sqlite3` | `ingestion_run` | One row per request: provider, dataset, endpoint, parameters, request and raw hashes, times, status, rows received, error, cache hit |
+| | `pipeline_run` | One row per `python -m eurogrid.pipeline run`: window, status (success, partial or failed), times |
+| | `pipeline_stage` | Per run: ingest, normalize, dbt and detect, each with status, duration, details (rows, files, test counts, freshness, events) and error |
 | `investigations.sqlite` | `anomaly_event` | Detected events (`anm_…`): zone, direction, window, scores, detector config, raw source IDs |
 | | `evidence` | Tool-call records (`ev_…`): tool, parameters, Gold models read, status, result summary, source IDs |
 | | `investigation_report` | Reports (`rpt_…`) from `rule-based-v1` or `langgraph-ollama:<model>` |
-| | `agent_trace` | Agent activity: graph path, who chose each tool, the model's draft before checks |
+| | `agent_trace` | Agent activity: graph path, who chose each tool, the model's draft before checks, and telemetry (model calls, time, prompt and output tokens) |
 | `simulations.sqlite` | `simulation_run` | Scenario, results and hourly flows per system (`sim_…`) |
 | `replays.sqlite` | `replay` | Event-to-household replays (`rpl_…`) |
-| `evaluations.sqlite` | `evaluation_run` | Scenario Lab runs per generator, with per-case checks |
+| `evaluations.sqlite` | `evaluation_run` | Scenario Lab runs per generator: per-case checks, number of repeats, cases passed per run, latency and token figures |
 | `chaos.sqlite` | `chaos_run` | Chaos experiments (`chs_…`); their database copies are in `data/chaos/<run>/` |
 
 ## Identifiers

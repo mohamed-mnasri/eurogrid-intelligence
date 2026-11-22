@@ -71,34 +71,39 @@ Use **Run AI agent** on a case. Without Ollama, the API returns a clear 503 and 
 ## Full setup with real data
 
 1. Create both environments as above.
-2. Copy `eurogrid_analytics/profiles.example.yml` to `eurogrid_analytics/profiles.yml`. That file is gitignored and needs no credentials.
-3. Ingest and model the data. The seed script respects Energy-Charts' rate limits; see [Phase 5](docs/phase5.md).
+2. Run the pipeline. It ingests (respecting Energy-Charts' rate limit), normalizes, runs `dbt build` and `dbt source freshness`, and detects anomalies. Every run and stage is recorded and shown on **Data Operations**. A backfill is limited to 366 days per run, so backfill a longer history in yearly chunks:
 
 ```powershell
-.\.venv\Scripts\python.exe -m scripts.phase5_seed_markets --start 2025-01-01 --end 2026-10-31
+.\.venv\Scripts\python.exe -m eurogrid.pipeline run --start 2025-01-01 --end 2025-12-31
 ```
 
 ```powershell
-.\.venv\Scripts\python.exe -m eurogrid.normalize
+.\.venv\Scripts\python.exe -m eurogrid.pipeline run --start 2026-01-01 --end 2026-10-31
+```
+
+After that, a plain `run` is incremental: it fetches from the day after the newest stored price up to yesterday, and loads only new raw files.
+
+```powershell
+.\.venv\Scripts\python.exe -m eurogrid.pipeline run
 ```
 
 ```powershell
-.\.venv-dbt\Scripts\dbt.exe build --project-dir eurogrid_analytics --profiles-dir eurogrid_analytics
+.\.venv\Scripts\python.exe -m eurogrid.pipeline status
 ```
 
-4. Start the API without the demo variables, then start the frontend:
+To schedule a daily run on Windows, run this from the repository folder (the task inherits that working directory):
+
+```powershell
+schtasks /Create /SC DAILY /ST 07:00 /TN "EuroGrid pipeline" /TR "cmd /c cd /d \"$PWD\" && .venv\Scripts\python.exe -m eurogrid.pipeline run"
+```
+
+3. Start the API without the demo variables, then start the frontend. Stop the API while the pipeline runs, because DuckDB allows one writer at a time.
 
 ```powershell
 .\.venv\Scripts\python.exe -m uvicorn eurogrid.api:app --reload --host 127.0.0.1 --port 8000
 ```
 
-5. Detect anomalies from **Market Analytics**, or with the CLI:
-
-```powershell
-.\.venv\Scripts\python.exe -m eurogrid.investigate_cli detect --zone DE-LU --start 2026-01-01 --end 2026-10-31
-```
-
-API documentation is at http://127.0.0.1:8000/docs.
+API documentation is at http://127.0.0.1:8000/docs. To run dbt by hand, copy `eurogrid_analytics/profiles.example.yml` to `eurogrid_analytics/profiles.yml` (gitignored, no credentials); see [the dbt project](eurogrid_analytics/README.md).
 
 ## Tests and CI
 
@@ -108,6 +113,10 @@ API documentation is at http://127.0.0.1:8000/docs.
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\dbt_synthetic_check.py
+```
+
+```powershell
+npm --prefix frontend test
 ```
 
 ```powershell
@@ -128,10 +137,10 @@ Run the Scenario Lab suite with the rule-based investigator:
 .\.venv\Scripts\python.exe -m eurogrid.evaluation
 ```
 
-Run it with the local AI agent:
+Run it with the local AI agent, three times over, to measure how stable it is (a check passes only if it passes in every run). Each run reports latency and token use:
 
 ```powershell
-.\.venv\Scripts\python.exe -m eurogrid.evaluation --generator agent
+.\.venv\Scripts\python.exe -m eurogrid.evaluation --generator agent --repeats 3
 ```
 
 Run a chaos experiment against a detected anomaly:

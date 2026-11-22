@@ -308,6 +308,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repeats", type=int, default=1, help="run the suite N times; a check must pass in every run")
     parser.add_argument("--store", type=Path, default=Path("data/metadata/evaluations.sqlite"))
     args = parser.parse_args(argv)
+    if args.generator == "agent":
+        from eurogrid.llm import ollama_status
+
+        ok, detail = ollama_status(args.model)
+        if not ok:   # without the model every call would fail and the run would measure the fallbacks, not the agent
+            print(f"Not running the agent suite: {detail}")
+            return 2
     payload = run_suite(args.generator, args.model, repeats=args.repeats)
     EvaluationStore(args.store).save(payload)
     print(f"{payload['generator']}: {payload['cases_passed']}/{payload['cases_total']} cases passed every check "

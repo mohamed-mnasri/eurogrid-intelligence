@@ -37,5 +37,8 @@ These are stated plainly so nobody reads more into the results than the data sup
 
 - **Single-user local tool.** No authentication or multi-user isolation; the API binds to `127.0.0.1`.
 - **Long requests block.** The agent and chaos runs are synchronous HTTP requests (30–100 s). There is no job queue.
+- **One writer at a time.** The pipeline normalizes into the same DuckDB file the API reads, and DuckDB allows one writer, so stop the API while the pipeline runs. Scheduling is a Windows Task Scheduler (or cron) entry calling `python -m eurogrid.pipeline run`; there is no orchestrator service, by design for a single-machine project.
+- **No automatic retry.** Pipeline stages are not retried. A failed run is recorded with its error, and the next incremental run picks up from the newest stored price, so nothing is skipped.
+- **`MarketOverview.tsx` is still one large component** (about 450 lines). The newer pages are split into components; this one was left as is because it works and is covered by manual testing.
 - **CI scope.** CI runs on synthetic data only, and the real-data pipeline is not run in CI. CI never calls Ollama; agent tests use a fake model.
 - **No Docker Compose.** It was considered and left out because it would not make startup simpler. Ollama, the dbt environment and the Vite dev server already start with one command each, and Ollama on Windows works best natively. See `docs/phase12.md`.
